@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # Copyright (c) 2007-2014 Heikki Hokkanen <hoxu@users.sf.net> & others (see doc/AUTHOR)
 # GPLv2 / GPLv3
 import datetime
@@ -14,8 +14,8 @@ import sys
 import time
 import zlib
 
-if sys.version_info < (2, 6):
-	print >> sys.stderr, "Python 2.6 or higher is required for gitstats"
+if sys.version_info < (3, 6):
+	print("Python 3.6 or higher is required for gitstats", file=sys.stderr)
 	sys.exit(1)
 
 from multiprocessing import Pool
@@ -54,7 +54,7 @@ def getpipeoutput(cmds, quiet = False):
 	global exectime_external
 	start = time.time()
 	if not quiet and ON_LINUX and os.isatty(1):
-		print '>> ' + ' | '.join(cmds),
+		print('>> ' + ' | '.join(cmds), end='')
 		sys.stdout.flush()
 	p = subprocess.Popen(cmds[0], stdout = subprocess.PIPE, shell = True)
 	processes=[p]
@@ -67,10 +67,10 @@ def getpipeoutput(cmds, quiet = False):
 	end = time.time()
 	if not quiet:
 		if ON_LINUX and os.isatty(1):
-			print '\r',
-		print '[%.5f] >> %s' % (end - start, ' | '.join(cmds))
+			print('\r', end='')
+		print('[%.5f] >> %s' % (end - start, ' | '.join(cmds)))
 	exectime_external += (end - start)
-	return output.rstrip('\n')
+	return output.decode('utf-8', errors='replace').rstrip('\n')
 
 def getlogrange(defaultrange = 'HEAD', end_only = True):
 	commit_range = getcommitrange(defaultrange, end_only)
@@ -86,14 +86,14 @@ def getcommitrange(defaultrange = 'HEAD', end_only = False):
 	return defaultrange
 
 def getkeyssortedbyvalues(dict):
-	return map(lambda el : el[1], sorted(map(lambda el : (el[1], el[0]), dict.items())))
+	return list(map(lambda el : el[1], sorted(map(lambda el : (el[1], el[0]), dict.items()))))
 
 # dict['author'] = { 'commits': 512 } - ...key(dict, 'commits')
 def getkeyssortedbyvaluekey(d, key):
-	return map(lambda el : el[1], sorted(map(lambda el : (d[el][key], el), d.keys())))
+	return list(map(lambda el : el[1], sorted(map(lambda el : (d[el][key], el), d.keys()))))
 
 def getstatsummarycounts(line):
-	numbers = re.findall('\d+', line)
+	numbers = re.findall(r'\d+', line)
 	if   len(numbers) == 1:
 		# neither insertions nor deletions: may probably only happen for "0 files changed"
 		numbers.append(0);
@@ -207,7 +207,7 @@ class DataCollector:
 	def loadCache(self, cachefile):
 		if not os.path.exists(cachefile):
 			return
-		print 'Loading cache...'
+		print('Loading cache...')
 		f = open(cachefile, 'rb')
 		try:
 			self.cache = pickle.loads(zlib.decompress(f.read()))
@@ -269,7 +269,7 @@ class DataCollector:
 	##
 	# Save cacheable data
 	def saveCache(self, cachefile):
-		print 'Saving cache...'
+		print('Saving cache...')
 		tempfile = cachefile + '.tmp'
 		f = open(tempfile, 'wb')
 		#pickle.dump(self.cache, f)
@@ -308,7 +308,7 @@ class GitDataCollector(DataCollector):
 				self.tags[tag] = { 'stamp': stamp, 'hash' : hash, 'date' : datetime.datetime.fromtimestamp(stamp).strftime('%Y-%m-%d'), 'commits': 0, 'authors': {} }
 
 		# collect info on tags, starting from latest
-		tags_sorted_by_date_desc = map(lambda el : el[1], reversed(sorted(map(lambda el : (el[1]['date'], el[0]), self.tags.items()))))
+		tags_sorted_by_date_desc = list(map(lambda el : el[1], reversed(sorted(map(lambda el : (el[1]['date'], el[0]), self.tags.items())))))
 		prev = None
 		for tag in reversed(tags_sorted_by_date_desc):
 			cmd = 'git shortlog -s "%s"' % tag
@@ -319,7 +319,7 @@ class GitDataCollector(DataCollector):
 				continue
 			prev = tag
 			for line in output.split('\n'):
-				parts = re.split('\s+', line, 2)
+				parts = re.split(r'\s+', line, 2)
 				commits = int(parts[1])
 				author = parts[2]
 				self.tags[tag]['commits'] += commits
@@ -444,10 +444,10 @@ class GitDataCollector(DataCollector):
 			time, rev = revline.split(' ')
 			#if cache empty then add time and rev to list of new rev's
 			#otherwise try to read needed info from cache
-			if 'files_in_tree' not in self.cache.keys():
+			if 'files_in_tree' not in self.cache:
 				revs_to_read.append((time,rev))
 				continue
-			if rev in self.cache['files_in_tree'].keys():
+			if rev in self.cache['files_in_tree']:
 				lines.append('%d %d' % (int(time), self.cache['files_in_tree'][rev]))
 			else:
 				revs_to_read.append((time,rev))
@@ -474,7 +474,7 @@ class GitDataCollector(DataCollector):
 			try:
 				self.files_by_stamp[int(stamp)] = int(files)
 			except ValueError:
-				print 'Warning: failed to parse line "%s"' % line
+				print('Warning: failed to parse line "%s"' % line)
 
 		# extensions and size of files
 		lines = getpipeoutput(['git ls-tree -r -l -z %s' % getcommitrange('HEAD', end_only = True)]).split('\000')
@@ -482,7 +482,7 @@ class GitDataCollector(DataCollector):
 		for line in lines:
 			if len(line) == 0:
 				continue
-			parts = re.split('\s+', line, 4)
+			parts = re.split(r'\s+', line, 4)
 			if parts[0] == '160000' and parts[3] == '-':
 				# skip submodules
 				continue
@@ -505,10 +505,10 @@ class GitDataCollector(DataCollector):
 			self.extensions[ext]['files'] += 1
 			#if cache empty then add ext and blob id to list of new blob's
 			#otherwise try to read needed info from cache
-			if 'lines_in_blob' not in self.cache.keys():
+			if 'lines_in_blob' not in self.cache:
 				blobs_to_read.append((ext,blob_id))
 				continue
-			if blob_id in self.cache['lines_in_blob'].keys():
+			if blob_id in self.cache['lines_in_blob']:
 				self.extensions[ext]['lines'] += self.cache['lines_in_blob'][blob_id]
 			else:
 				blobs_to_read.append((ext,blob_id))
@@ -563,21 +563,21 @@ class GitDataCollector(DataCollector):
 
 						files, inserted, deleted = 0, 0, 0
 					except ValueError:
-						print 'Warning: unexpected line "%s"' % line
+						print('Warning: unexpected line "%s"' % line)
 				else:
-					print 'Warning: unexpected line "%s"' % line
+					print('Warning: unexpected line "%s"' % line)
 			else:
 				numbers = getstatsummarycounts(line)
 
 				if len(numbers) == 3:
-					(files, inserted, deleted) = map(lambda el : int(el), numbers)
+					(files, inserted, deleted) = list(map(lambda el : int(el), numbers))
 					total_lines += inserted
 					total_lines -= deleted
 					self.total_lines_added += inserted
 					self.total_lines_removed += deleted
 
 				else:
-					print 'Warning: failed to handle line "%s"' % line
+					print('Warning: failed to handle line "%s"' % line)
 					(files, inserted, deleted) = (0, 0, 0)
 				#self.changes_by_date[stamp] = { 'files': files, 'ins': inserted, 'del': deleted }
 		self.total_lines += total_lines
@@ -622,16 +622,16 @@ class GitDataCollector(DataCollector):
 						self.changes_by_date_by_author[stamp][author]['commits'] = self.authors[author]['commits']
 						files, inserted, deleted = 0, 0, 0
 					except ValueError:
-						print 'Warning: unexpected line "%s"' % line
+						print('Warning: unexpected line "%s"' % line)
 				else:
-					print 'Warning: unexpected line "%s"' % line
+					print('Warning: unexpected line "%s"' % line)
 			else:
 				numbers = getstatsummarycounts(line);
 
 				if len(numbers) == 3:
-					(files, inserted, deleted) = map(lambda el : int(el), numbers)
+					(files, inserted, deleted) = list(map(lambda el : int(el), numbers))
 				else:
-					print 'Warning: failed to handle line "%s"' % line
+					print('Warning: failed to handle line "%s"' % line)
 					(files, inserted, deleted) = (0, 0, 0)
 	
 	def refine(self):
@@ -642,7 +642,7 @@ class GitDataCollector(DataCollector):
 		for i, name in enumerate(self.authors_by_commits):
 			self.authors[name]['place_by_commits'] = i + 1
 
-		for name in self.authors.keys():
+		for name in list(self.authors.keys()):
 			a = self.authors[name]
 			a['commits_frac'] = (100 * float(a['commits'])) / self.getTotalCommits()
 			date_first = datetime.datetime.fromtimestamp(a['first_commit_stamp'])
@@ -672,13 +672,13 @@ class GitDataCollector(DataCollector):
 		return res[:limit]
 	
 	def getCommitDeltaDays(self):
-		return (self.last_commit_stamp / 86400 - self.first_commit_stamp / 86400) + 1
+		return (self.last_commit_stamp // 86400 - self.first_commit_stamp // 86400) + 1
 
 	def getDomainInfo(self, domain):
 		return self.domains[domain]
 
 	def getDomains(self):
-		return self.domains.keys()
+		return list(self.domains.keys())
 	
 	def getFirstCommitDate(self):
 		return datetime.datetime.fromtimestamp(self.first_commit_stamp)
@@ -733,6 +733,17 @@ class HTMLReportCreator(ReportCreator):
 		ReportCreator.create(self, data, path)
 		self.title = data.projectname
 
+		# Prepare safe local values to avoid division-by-zero and empty-collection errors
+		total_commits = data.getTotalCommits()
+		total_active_days = len(data.getActiveDays()) if hasattr(data, 'getActiveDays') else 0
+		delta_days = data.getCommitDeltaDays() if hasattr(data, 'getCommitDeltaDays') else 0
+		total_authors = data.getTotalAuthors()
+		# busiest counters: use 1 as denominator if no activity recorded to avoid ZeroDivisionError
+		hour_of_day_busiest = data.activity_by_hour_of_day_busiest if getattr(data, 'activity_by_hour_of_day_busiest', 0) > 0 else 1
+		hour_of_week_busiest = data.activity_by_hour_of_week_busiest if getattr(data, 'activity_by_hour_of_week_busiest', 0) > 0 else 1
+		# timezone max for coloring; default to 1 if empty
+		max_commits_on_tz = max(data.commits_by_timezone.values()) if data.commits_by_timezone else 1
+
 		# copy static files. Looks in the binary directory, ../share/gitstats and /usr/share/gitstats
 		binarypath = os.path.dirname(os.path.abspath(__file__))
 		secondarypath = os.path.join(binarypath, '..', 'share', 'gitstats')
@@ -744,7 +755,7 @@ class HTMLReportCreator(ReportCreator):
 					shutil.copyfile(src, path + '/' + file)
 					break
 			else:
-				print 'Warning: "%s" not found, so not copied (searched: %s)' % (file, basedirs)
+				print('Warning: "%s" not found, so not copied (searched: %s)' % (file, basedirs))
 
 		f = open(path + "/index.html", 'w')
 		format = '%Y-%m-%d %H:%M:%S'
@@ -759,11 +770,14 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<dt>Generated</dt><dd>%s (in %d seconds)</dd>' % (datetime.datetime.now().strftime(format), time.time() - data.getStampCreated()))
 		f.write('<dt>Generator</dt><dd><a href="http://gitstats.sourceforge.net/">GitStats</a> (version %s), %s, %s</dd>' % (getversion(), getgitversion(), getgnuplotversion()))
 		f.write('<dt>Report Period</dt><dd>%s to %s</dd>' % (data.getFirstCommitDate().strftime(format), data.getLastCommitDate().strftime(format)))
-		f.write('<dt>Age</dt><dd>%d days, %d active days (%3.2f%%)</dd>' % (data.getCommitDeltaDays(), len(data.getActiveDays()), (100.0 * len(data.getActiveDays()) / data.getCommitDeltaDays())))
+		f.write('<dt>Age</dt><dd>%d days, %d active days (%3.2f%%)</dd>' % (data.getCommitDeltaDays(), total_active_days, (100.0 * total_active_days / data.getCommitDeltaDays()) if data.getCommitDeltaDays() else 0.0))
 		f.write('<dt>Total Files</dt><dd>%s</dd>' % data.getTotalFiles())
 		f.write('<dt>Total Lines of Code</dt><dd>%s (%d added, %d removed)</dd>' % (data.getTotalLOC(), data.total_lines_added, data.total_lines_removed))
-		f.write('<dt>Total Commits</dt><dd>%s (average %.1f commits per active day, %.1f per all days)</dd>' % (data.getTotalCommits(), float(data.getTotalCommits()) / len(data.getActiveDays()), float(data.getTotalCommits()) / data.getCommitDeltaDays()))
-		f.write('<dt>Authors</dt><dd>%s (average %.1f commits per author)</dd>' % (data.getTotalAuthors(), (1.0 * data.getTotalCommits()) / data.getTotalAuthors()))
+		avg_active = float(total_commits) / total_active_days if total_active_days else 0.0
+		avg_all = float(total_commits) / delta_days if delta_days else 0.0
+		f.write('<dt>Total Commits</dt><dd>%s (average %.1f commits per active day, %.1f per all days)</dd>' % (total_commits, avg_active, avg_all))
+		avg_per_author = float(total_commits) / total_authors if total_authors else 0.0
+		f.write('<dt>Authors</dt><dd>%s (average %.1f commits per author)</dd>' % (total_authors, avg_per_author))
 		f.write('</dl>')
 
 		f.write('</body>\n</html>')
@@ -823,7 +837,7 @@ class HTMLReportCreator(ReportCreator):
 		fp = open(path + '/hour_of_day.dat', 'w')
 		for i in range(0, 24):
 			if i in hour_of_day:
-				r = 127 + int((float(hour_of_day[i]) / data.activity_by_hour_of_day_busiest) * 128)
+				r = 127 + int((float(hour_of_day[i]) / hour_of_day_busiest) * 128)
 				f.write('<td style="background-color: rgb(%d, 0, 0)">%d</td>' % (r, hour_of_day[i]))
 				fp.write('%d %d\n' % (i, hour_of_day[i]))
 			else:
@@ -831,11 +845,12 @@ class HTMLReportCreator(ReportCreator):
 				fp.write('%d 0\n' % i)
 		fp.close()
 		f.write('</tr>\n<tr><th>%</th>')
-		totalcommits = data.getTotalCommits()
+		totalcommits = total_commits
 		for i in range(0, 24):
 			if i in hour_of_day:
-				r = 127 + int((float(hour_of_day[i]) / data.activity_by_hour_of_day_busiest) * 128)
-				f.write('<td style="background-color: rgb(%d, 0, 0)">%.2f</td>' % (r, (100.0 * hour_of_day[i]) / totalcommits))
+				r = 127 + int((float(hour_of_day[i]) / hour_of_day_busiest) * 128)
+				percent = (100.0 * hour_of_day[i]) / totalcommits if totalcommits else 0.0
+				f.write('<td style="background-color: rgb(%d, 0, 0)">%.2f</td>' % (r, percent))
 			else:
 				f.write('<td>0.00</td>')
 		f.write('</tr></table>')
@@ -862,7 +877,8 @@ class HTMLReportCreator(ReportCreator):
 			f.write('<tr>')
 			f.write('<th>%s</th>' % (WEEKDAYS[d]))
 			if d in day_of_week:
-				f.write('<td>%d (%.2f%%)</td>' % (day_of_week[d], (100.0 * day_of_week[d]) / totalcommits))
+				percent = (100.0 * day_of_week[d]) / totalcommits if totalcommits else 0.0
+				f.write('<td>%d (%.2f%%)</td>' % (day_of_week[d], percent))
 			else:
 				f.write('<td>0</td>')
 			f.write('</tr>')
@@ -906,7 +922,8 @@ class HTMLReportCreator(ReportCreator):
 			commits = 0
 			if mm in data.activity_by_month_of_year:
 				commits = data.activity_by_month_of_year[mm]
-			f.write('<tr><td>%d</td><td>%d (%.2f %%)</td></tr>' % (mm, commits, (100.0 * commits) / data.getTotalCommits()))
+			percent = (100.0 * commits) / total_commits if total_commits else 0.0
+			f.write('<tr><td>%d</td><td>%d (%.2f %%)</td></tr>' % (mm, commits, percent))
 			fp.write('%d %d\n' % (mm, commits))
 		fp.close()
 		f.write('</table></div>')
@@ -928,7 +945,9 @@ class HTMLReportCreator(ReportCreator):
 		f.write(html_header(2, 'Commits by Year'))
 		f.write('<div class="vtable"><table><tr><th>Year</th><th>Commits (% of all)</th><th>Lines added</th><th>Lines removed</th></tr>')
 		for yy in reversed(sorted(data.commits_by_year.keys())):
-			f.write('<tr><td>%s</td><td>%d (%.2f%%)</td><td>%d</td><td>%d</td></tr>' % (yy, data.commits_by_year.get(yy,0), (100.0 * data.commits_by_year.get(yy,0)) / data.getTotalCommits(), data.lines_added_by_year.get(yy,0), data.lines_removed_by_year.get(yy,0)))
+			commits = data.commits_by_year.get(yy, 0)
+			percent = (100.0 * commits) / total_commits if total_commits else 0.0
+			f.write('<tr><td>%s</td><td>%d (%.2f%%)</td><td>%d</td><td>%d</td></tr>' % (yy, commits, percent, data.lines_added_by_year.get(yy,0), data.lines_removed_by_year.get(yy,0)))
 		f.write('</table></div>')
 		f.write('<img src="commits_by_year.png" alt="Commits by Year">')
 		fg = open(path + '/commits_by_year.dat', 'w')
@@ -941,7 +960,7 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<table><tr>')
 		f.write('<th>Timezone</th><th>Commits</th>')
 		f.write('</tr>')
-		max_commits_on_tz = max(data.commits_by_timezone.values())
+		max_commits_on_tz = max(data.commits_by_timezone.values()) if data.commits_by_timezone else 1
 		for i in sorted(data.commits_by_timezone.keys(), key = lambda n : int(n)):
 			commits = data.commits_by_timezone[i]
 			r = 127 + int((float(commits) / max_commits_on_tz) * 128)
@@ -1006,7 +1025,7 @@ class HTMLReportCreator(ReportCreator):
 			fgl.write('%d' % stamp)
 			fgc.write('%d' % stamp)
 			for author in self.authors_to_plot:
-				if author in data.changes_by_date_by_author[stamp].keys():
+				if author in data.changes_by_date_by_author[stamp]:
 					lines_by_authors[author] = data.changes_by_date_by_author[stamp][author]['lines_added']
 					commits_by_authors[author] = data.changes_by_date_by_author[stamp][author]['commits']
 				fgl.write(' %d' % lines_by_authors[author])
@@ -1056,7 +1075,8 @@ class HTMLReportCreator(ReportCreator):
 			n += 1
 			info = data.getDomainInfo(domain)
 			fp.write('%s %d %d\n' % (domain, n , info['commits']))
-			f.write('<tr><th>%s</th><td>%d (%.2f%%)</td></tr>' % (domain, info['commits'], (100.0 * info['commits'] / totalcommits)))
+			percent = (100.0 * info['commits'] / total_commits) if total_commits else 0.0
+			f.write('<tr><th>%s</th><td>%d (%.2f%%)</td></tr>' % (domain, info['commits'], percent))
 		f.write('</table></div>')
 		f.write('<img src="domains.png" alt="Commits by Domains">')
 		fp.close()
@@ -1075,7 +1095,8 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<dt>Total files</dt><dd>%d</dd>' % data.getTotalFiles())
 		f.write('<dt>Total lines</dt><dd>%d</dd>' % data.getTotalLOC())
 		try:
-			f.write('<dt>Average file size</dt><dd>%.2f bytes</dd>' % (float(data.getTotalSize()) / data.getTotalFiles()))
+			avg_size = float(data.getTotalSize()) / data.getTotalFiles() if data.getTotalFiles() else 0.0
+			f.write('<dt>Average file size</dt><dd>%.2f bytes</dd>' % (avg_size))
 		except ZeroDivisionError:
 			pass
 		f.write('</dl>\n')
@@ -1105,11 +1126,10 @@ class HTMLReportCreator(ReportCreator):
 		for ext in sorted(data.extensions.keys()):
 			files = data.extensions[ext]['files']
 			lines = data.extensions[ext]['lines']
-			try:
-				loc_percentage = (100.0 * lines) / data.getTotalLOC()
-			except ZeroDivisionError:
-				loc_percentage = 0
-			f.write('<tr><td>%s</td><td>%d (%.2f%%)</td><td>%d (%.2f%%)</td><td>%d</td></tr>' % (ext, files, (100.0 * files) / data.getTotalFiles(), lines, loc_percentage, lines / files))
+			loc_percentage = (100.0 * lines) / data.getTotalLOC() if data.getTotalLOC() else 0.0
+			files_percentage = (100.0 * files) / data.getTotalFiles() if data.getTotalFiles() else 0.0
+			lines_per_file = (lines // files) if files else 0
+			f.write('<tr><td>%s</td><td>%d (%.2f%%)</td><td>%d (%.2f%%)</td><td>%d</td></tr>' % (ext, files, files_percentage, lines, loc_percentage, lines_per_file))
 		f.write('</table>')
 
 		f.write('</body></html>')
@@ -1153,7 +1173,7 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<table class="tags">')
 		f.write('<tr><th>Name</th><th>Date</th><th>Commits</th><th>Authors</th></tr>')
 		# sort the tags by date desc
-		tags_sorted_by_date_desc = map(lambda el : el[1], reversed(sorted(map(lambda el : (el[1]['date'], el[0]), data.tags.items()))))
+		tags_sorted_by_date_desc = list(map(lambda el : el[1], reversed(sorted(map(lambda el : (el[1]['date'], el[0]), data.tags.items())))))
 		for tag in tags_sorted_by_date_desc:
 			authorinfo = []
 			self.authors_by_commits = getkeyssortedbyvalues(data.tags[tag]['authors'])
@@ -1168,7 +1188,7 @@ class HTMLReportCreator(ReportCreator):
 		self.createGraphs(path)
 	
 	def createGraphs(self, path):
-		print 'Generating graphs...'
+		print('Generating graphs...')
 
 		# hour of day
 		f = open(path + '/hour_of_day.plot', 'w')
@@ -1370,7 +1390,7 @@ plot """
 		for f in files:
 			out = getpipeoutput([gnuplot_cmd + ' "%s"' % f])
 			if len(out) > 0:
-				print out
+				print(out)
 
 	def printHeader(self, f, title = ''):
 		f.write(
@@ -1401,7 +1421,7 @@ plot """
 """)
 		
 def usage():
-	print """
+	print("""
 Usage: gitstats [options] <gitpath..> <outputpath>
 
 Options:
@@ -1411,7 +1431,7 @@ Default config values:
 %s
 
 Please see the manual page for more details.
-""" % conf
+""" % conf)
 
 
 class GitStats:
@@ -1442,48 +1462,48 @@ class GitStats:
 		except OSError:
 			pass
 		if not os.path.isdir(outputpath):
-			print 'FATAL: Output path is not a directory or does not exist'
+			print('FATAL: Output path is not a directory or does not exist')
 			sys.exit(1)
 
 		if not getgnuplotversion():
-			print 'gnuplot not found'
+			print('gnuplot not found')
 			sys.exit(1)
 
-		print 'Output path: %s' % outputpath
+		print('Output path: %s' % outputpath)
 		cachefile = os.path.join(outputpath, 'gitstats.cache')
 
 		data = GitDataCollector()
 		data.loadCache(cachefile)
 
 		for gitpath in args[0:-1]:
-			print 'Git path: %s' % gitpath
+			print('Git path: %s' % gitpath)
 
 			prevdir = os.getcwd()
 			os.chdir(gitpath)
 
-			print 'Collecting data...'
+			print('Collecting data...')
 			data.collect(gitpath)
 
 			os.chdir(prevdir)
 
-		print 'Refining data...'
+		print('Refining data...')
 		data.saveCache(cachefile)
 		data.refine()
 
 		os.chdir(rundir)
 
-		print 'Generating report...'
+		print('Generating report...')
 		report = HTMLReportCreator()
 		report.create(data, outputpath)
 
 		time_end = time.time()
 		exectime_internal = time_end - time_start
-		print 'Execution time %.5f secs, %.5f secs (%.2f %%) in external commands)' % (exectime_internal, exectime_external, (100.0 * exectime_external) / exectime_internal)
+		print('Execution time %.5f secs, %.5f secs (%.2f %%) in external commands)' % (exectime_internal, exectime_external, (100.0 * exectime_external) / exectime_internal))
 		if sys.stdin.isatty():
-			print 'You may now run:'
-			print
-			print '   sensible-browser \'%s\'' % os.path.join(outputpath, 'index.html').replace("'", "'\\''")
-			print
+			print('You may now run:')
+			print()
+			print('   sensible-browser \'%s\'' % os.path.join(outputpath, 'index.html').replace("'", "'\\''"))
+			print()
 
 if __name__=='__main__':
 	g = GitStats()
