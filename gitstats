@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import zlib
+from fpdf import FPDF
 
 if sys.version_info < (3, 6):
 	print("Python 3.6 or higher is required for gitstats", file=sys.stderr)
@@ -47,7 +48,8 @@ conf = {
 	'linear_linestats': 1,
 	'project_name': '',
 	'processes': 8,
-	'start_date': ''
+	'start_date': '',
+	'output_format': 'html'  # 'html', 'pdf', or 'both'
 }
 
 def getpipeoutput(cmds, quiet = False):
@@ -1419,6 +1421,524 @@ plot """
 </ul>
 </div>
 """)
+
+class PDFReportCreator(ReportCreator):
+	"""Creates PDF reports using fpdf2 library with embedded charts and tab-based structure."""
+	
+	def __init__(self):
+		ReportCreator.__init__(self)
+		self.pdf = None
+		self.output_path = None
+	
+	def create(self, data, path):
+		ReportCreator.create(self, data, path)
+		self.title = data.projectname
+		self.output_path = path
+		
+		# Initialize PDF document
+		self.pdf = FPDF()
+		self.pdf.set_auto_page_break(auto=True, margin=15)
+		
+		# Create all pages (tabs)
+		self._create_title_page(data)
+		self._create_general_page(data)
+		self._create_activity_page(data)
+		self._create_authors_page(data)
+		self._create_files_page(data)
+		self._create_lines_page(data)
+		self._create_tags_page(data)
+		
+		# Save PDF
+		pdf_path = os.path.join(path, f"gitstats_{data.projectname.replace(' ', '_')}.pdf")
+		self.pdf.output(pdf_path)
+		print(f"PDF report saved to: {pdf_path}")
+	
+	def _add_chart_if_exists(self, chart_filename, width=None, height=None):
+		"""Add a chart image to the PDF if it exists."""
+		chart_path = os.path.join(self.output_path, chart_filename)
+		if os.path.exists(chart_path):
+			try:
+				# Get current position
+				x = self.pdf.get_x()
+				y = self.pdf.get_y()
+				
+				# Calculate dimensions
+				if width is None:
+					width = 150  # Default width
+				if height is None:
+					height = 80  # Default height
+				
+				# Check if there's enough space, if not add page break
+				if y + height > 280:  # 280 is roughly page height minus margin
+					self.pdf.add_page()
+					y = self.pdf.get_y()
+				
+				# Add image
+				self.pdf.image(chart_path, x, y, width, height)
+				
+				# Move cursor below image
+				self.pdf.set_y(y + height + 5)
+				
+				return True
+			except Exception as e:
+				print(f"Warning: Could not add chart {chart_filename}: {e}")
+				return False
+		return False
+	
+	def _create_title_page(self, data):
+		"""Create the title page of the PDF report."""
+		self.pdf.add_page()
+		self.pdf.set_font('Arial', 'B', 24)
+		self.pdf.cell(0, 20, f'GitStats Report - {data.projectname}', 0, 1, 'C')
+		
+		self.pdf.ln(10)
+		self.pdf.set_font('Arial', '', 12)
+		format = '%Y-%m-%d %H:%M:%S'
+		
+		# Report generation info
+		self.pdf.cell(0, 10, f'Generated: {datetime.datetime.now().strftime(format)}', 0, 1)
+		self.pdf.cell(0, 10, f'Generator: GitStats (version {getversion()})', 0, 1)
+		self.pdf.cell(0, 10, f'Git Version: {getgitversion()}', 0, 1)
+		if getgnuplotversion():
+			self.pdf.cell(0, 10, f'Gnuplot Version: {getgnuplotversion()}', 0, 1)
+		
+		self.pdf.ln(10)
+		self.pdf.cell(0, 10, f'Report Period: {data.getFirstCommitDate().strftime(format)} to {data.getLastCommitDate().strftime(format)}', 0, 1)
+		
+		# Table of contents
+		self.pdf.ln(15)
+		self.pdf.set_font('Arial', 'B', 16)
+		self.pdf.cell(0, 10, 'Table of Contents', 0, 1, 'L')
+		
+		self.pdf.set_font('Arial', '', 12)
+		sections = [
+			'1. General Statistics',
+			'2. Activity Statistics', 
+			'3. Authors Statistics',
+			'4. Files Statistics',
+			'5. Lines of Code Statistics',
+			'6. Tags Statistics'
+		]
+		
+		for section in sections:
+			self.pdf.cell(0, 8, section, 0, 1, 'L')
+	
+	def _create_general_page(self, data):
+		"""Create the general statistics page (mirrors index.html)."""
+		self.pdf.add_page()
+		self.pdf.set_font('Arial', 'B', 20)
+		self.pdf.cell(0, 15, '1. General Statistics', 0, 1, 'L')
+		
+		self.pdf.set_font('Arial', '', 12)
+		
+		# Calculate basic stats
+		total_commits = data.getTotalCommits()
+		total_active_days = len(data.getActiveDays()) if hasattr(data, 'getActiveDays') else 0
+		delta_days = data.getCommitDeltaDays() if hasattr(data, 'getCommitDeltaDays') else 0
+		total_authors = data.getTotalAuthors()
+		
+		# General statistics (matching index.html exactly)
+		stats = [
+			('Project name', data.projectname),
+			('Generated', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+			('Report Period', f"{data.getFirstCommitDate().strftime('%Y-%m-%d %H:%M:%S')} to {data.getLastCommitDate().strftime('%Y-%m-%d %H:%M:%S')}"),
+			('Age', f"{delta_days} days, {total_active_days} active days ({(100.0 * total_active_days / delta_days) if delta_days else 0.0:.2f}%)"),
+			('Total Files', str(data.getTotalFiles())),
+			('Total Lines of Code', f"{data.getTotalLOC()} ({data.total_lines_added} added, {data.total_lines_removed} removed)"),
+			('Total Commits', f"{total_commits} (average {(float(total_commits) / total_active_days) if total_active_days else 0.0:.1f} commits per active day, {(float(total_commits) / delta_days) if delta_days else 0.0:.1f} per all days)"),
+			('Authors', f"{total_authors} (average {(float(total_commits) / total_authors) if total_authors else 0.0:.1f} commits per author)")
+		]
+		
+		# Display stats
+		for label, value in stats:
+			self.pdf.cell(50, 8, f"{label}:", 0, 0, 'L')
+			self.pdf.cell(0, 8, str(value), 0, 1, 'L')
+		
+		self.pdf.ln(10)
+	
+	def _create_activity_page(self, data):
+		"""Create the activity statistics page with charts (mirrors activity.html)."""
+		self.pdf.add_page()
+		self.pdf.set_font('Arial', 'B', 20)
+		self.pdf.cell(0, 15, '2. Activity Statistics', 0, 1, 'L')
+		
+		# Weekly activity section
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Weekly Activity', 0, 1, 'L')
+		self.pdf.set_font('Arial', '', 10)
+		self.pdf.cell(0, 6, 'Last 32 weeks activity (see chart below)', 0, 1, 'L')
+		self.pdf.ln(5)
+		
+		# Hour of Day section
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Hour of Day', 0, 1, 'L')
+		
+		self.pdf.set_font('Arial', '', 10)
+		hour_of_day = data.getActivityByHourOfDay()
+		total_commits = data.getTotalCommits()
+		
+		# Create hour of day table
+		self.pdf.set_font('Arial', 'B', 8)
+		self.pdf.cell(20, 6, 'Hour', 1, 0, 'C')
+		for h in range(0, 24):
+			self.pdf.cell(7, 6, str(h), 1, 0, 'C')
+		self.pdf.ln()
+		
+		self.pdf.cell(20, 6, 'Commits', 1, 0, 'C')
+		for h in range(0, 24):
+			commits = hour_of_day.get(h, 0)
+			self.pdf.cell(7, 6, str(commits), 1, 0, 'C')
+		self.pdf.ln()
+		
+		self.pdf.cell(20, 6, '%', 1, 0, 'C')
+		for h in range(0, 24):
+			commits = hour_of_day.get(h, 0)
+			percent = (100.0 * commits / total_commits) if total_commits else 0.0
+			self.pdf.cell(7, 6, f"{percent:.1f}", 1, 0, 'C')
+		self.pdf.ln(10)
+		
+		# Add hour of day chart
+		self._add_chart_if_exists('hour_of_day.png', 180, 90)
+		
+		# Day of Week section
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Day of Week', 0, 1, 'L')
+		
+		self.pdf.set_font('Arial', '', 10)
+		day_of_week = data.getActivityByDayOfWeek()
+		
+		# Create day of week table
+		self.pdf.set_font('Arial', 'B', 10)
+		self.pdf.cell(30, 8, 'Day', 1, 0, 'C')
+		self.pdf.cell(30, 8, 'Total (%)', 1, 1, 'C')
+		
+		self.pdf.set_font('Arial', '', 10)
+		for d in range(0, 7):
+			day_name = WEEKDAYS[d]
+			commits = day_of_week.get(d, 0)
+			percent = (100.0 * commits / total_commits) if total_commits else 0.0
+			self.pdf.cell(30, 6, day_name, 1, 0, 'L')
+			self.pdf.cell(30, 6, f"{commits} ({percent:.2f}%)", 1, 1, 'L')
+		
+		self.pdf.ln(5)
+		self._add_chart_if_exists('day_of_week.png', 180, 90)
+		
+		# Month of Year section  
+		if hasattr(data, 'activity_by_month_of_year'):
+			self.pdf.set_font('Arial', 'B', 14) 
+			self.pdf.cell(0, 10, 'Month of Year', 0, 1, 'L')
+			
+			self.pdf.set_font('Arial', 'B', 10)
+			self.pdf.cell(30, 8, 'Month', 1, 0, 'C')
+			self.pdf.cell(40, 8, 'Commits (%)', 1, 1, 'C')
+			
+			self.pdf.set_font('Arial', '', 10)
+			for mm in range(1, 13):
+				commits = data.activity_by_month_of_year.get(mm, 0)
+				percent = (100.0 * commits / total_commits) if total_commits else 0.0
+				self.pdf.cell(30, 6, str(mm), 1, 0, 'C')
+				self.pdf.cell(40, 6, f"{commits} ({percent:.2f} %)", 1, 1, 'L')
+			
+			self.pdf.ln(5)
+			self._add_chart_if_exists('month_of_year.png', 180, 90)
+		
+		# Add page break for next major chart
+		if self.pdf.get_y() > 200:
+			self.pdf.add_page()
+		
+		# Commits by year/month chart
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Commits by Year/Month', 0, 1, 'L')
+		self._add_chart_if_exists('commits_by_year_month.png', 180, 100)
+		
+		# Commits by year chart 
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Commits by Year', 0, 1, 'L')
+		self._add_chart_if_exists('commits_by_year.png', 180, 100)
+	
+	def _create_authors_page(self, data):
+		"""Create the authors statistics page with charts (mirrors authors.html)."""
+		self.pdf.add_page()
+		self.pdf.set_font('Arial', 'B', 20)
+		self.pdf.cell(0, 15, '3. Authors Statistics', 0, 1, 'L')
+		
+		# List of Authors table
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'List of Authors', 0, 1, 'L')
+		
+		authors = data.getAuthors(conf['max_authors'])
+		
+		# Table header
+		self.pdf.set_font('Arial', 'B', 8)
+		self.pdf.cell(35, 6, 'Author', 1, 0, 'C')
+		self.pdf.cell(20, 6, 'Commits (%)', 1, 0, 'C')
+		self.pdf.cell(15, 6, '+ lines', 1, 0, 'C')
+		self.pdf.cell(15, 6, '- lines', 1, 0, 'C')
+		self.pdf.cell(25, 6, 'First commit', 1, 0, 'C')
+		self.pdf.cell(25, 6, 'Last commit', 1, 0, 'C')
+		self.pdf.cell(20, 6, 'Age', 1, 0, 'C')
+		self.pdf.cell(15, 6, 'Active days', 1, 1, 'C')
+		
+		# Table data
+		self.pdf.set_font('Arial', '', 7)
+		for author in authors[:20]:  # Top 20 authors
+			info = data.getAuthorInfo(author)
+			
+			# Truncate long author names
+			display_author = author[:18] + "..." if len(author) > 21 else author
+			
+			self.pdf.cell(35, 5, display_author, 1, 0, 'L')
+			self.pdf.cell(20, 5, f"{info['commits']} ({info['commits_frac']:.1f}%)", 1, 0, 'C')
+			self.pdf.cell(15, 5, str(info['lines_added']), 1, 0, 'C')
+			self.pdf.cell(15, 5, str(info['lines_removed']), 1, 0, 'C')
+			self.pdf.cell(25, 5, info['date_first'][:10], 1, 0, 'C')
+			self.pdf.cell(25, 5, info['date_last'][:10], 1, 0, 'C')
+			
+			# Calculate age
+			try:
+				age_days = (datetime.datetime.strptime(info['date_last'][:10], '%Y-%m-%d') - 
+						   datetime.datetime.strptime(info['date_first'][:10], '%Y-%m-%d')).days
+				age_text = f"{age_days} days" if age_days > 0 else "1 day"
+			except:
+				age_text = "N/A"
+			
+			active_days = len(info.get('active_days', [0])) if 'active_days' in info else 1
+			
+			self.pdf.cell(20, 5, age_text[:12], 1, 0, 'C')
+			self.pdf.cell(15, 5, str(active_days), 1, 1, 'C')
+		
+		self.pdf.ln(10)
+		
+		# Lines of code by author chart
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Cumulated Added Lines of Code per Author', 0, 1, 'L')
+		self._add_chart_if_exists('lines_of_code_by_author.png', 180, 110)
+		
+		# Commits per author chart
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Commits per Author', 0, 1, 'L')
+		self._add_chart_if_exists('commits_by_author.png', 180, 110)
+		
+		# Commits by domains chart
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Commits by Domains', 0, 1, 'L')
+		self._add_chart_if_exists('domains.png', 180, 100)
+	
+	def _create_files_page(self, data):
+		"""Create the files statistics page with charts (mirrors files.html)."""
+		self.pdf.add_page()
+		self.pdf.set_font('Arial', 'B', 20)
+		self.pdf.cell(0, 15, '4. Files Statistics', 0, 1, 'L')
+		
+		# Basic file stats
+		total_files = data.getTotalFiles()
+		total_loc = data.getTotalLOC()
+		
+		self.pdf.set_font('Arial', '', 12)
+		stats = [
+			('Total files', str(total_files)),
+			('Total lines', str(total_loc)),
+		]
+		
+		try:
+			avg_size = float(data.getTotalSize()) / total_files if total_files else 0.0
+			stats.append(('Average file size', f"{avg_size:.2f} bytes"))
+		except (AttributeError, ZeroDivisionError):
+			pass
+		
+		for label, value in stats:
+			self.pdf.cell(50, 8, f"{label}:", 0, 0, 'L')
+			self.pdf.cell(0, 8, str(value), 0, 1, 'L')
+		
+		self.pdf.ln(10)
+		
+		# File extensions
+		if hasattr(data, 'extensions') and data.extensions:
+			self.pdf.set_font('Arial', 'B', 14)
+			self.pdf.cell(0, 10, 'File Extensions', 0, 1, 'L')
+			
+			# Table header
+			self.pdf.set_font('Arial', 'B', 9)
+			self.pdf.cell(25, 8, 'Extension', 1, 0, 'C')
+			self.pdf.cell(20, 8, 'Files', 1, 0, 'C')
+			self.pdf.cell(20, 8, '% Files', 1, 0, 'C')
+			self.pdf.cell(25, 8, 'Lines', 1, 0, 'C')
+			self.pdf.cell(20, 8, '% Lines', 1, 0, 'C')
+			self.pdf.cell(25, 8, 'Lines/File', 1, 1, 'C')
+			
+			# Table data - show top extensions
+			self.pdf.set_font('Arial', '', 8)
+			sorted_extensions = sorted(data.extensions.items(), 
+									 key=lambda x: x[1]['files'], reverse=True)[:15]
+			
+			for ext, ext_data in sorted_extensions:
+				files = ext_data['files']
+				lines = ext_data['lines']
+				loc_percentage = (100.0 * lines / total_loc) if total_loc else 0.0
+				files_percentage = (100.0 * files / total_files) if total_files else 0.0
+				lines_per_file = (lines // files) if files else 0
+				
+				display_ext = ext if ext else '(no ext)'
+				
+				self.pdf.cell(25, 6, display_ext[:12], 1, 0, 'L')
+				self.pdf.cell(20, 6, str(files), 1, 0, 'C')
+				self.pdf.cell(20, 6, f"{files_percentage:.1f}%", 1, 0, 'C')
+				self.pdf.cell(25, 6, str(lines), 1, 0, 'C')
+				self.pdf.cell(20, 6, f"{loc_percentage:.1f}%", 1, 0, 'C')
+				self.pdf.cell(25, 6, str(lines_per_file), 1, 1, 'C')
+		
+		self.pdf.ln(10)
+		
+		# Files by date chart
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Files by Date', 0, 1, 'L')
+		self._add_chart_if_exists('files_by_date.png', 180, 100)
+	
+	def _create_lines_page(self, data):
+		"""Create the lines of code statistics page with charts (mirrors lines.html)."""
+		self.pdf.add_page()
+		self.pdf.set_font('Arial', 'B', 20)
+		self.pdf.cell(0, 15, '5. Lines of Code Statistics', 0, 1, 'L')
+		
+		# Basic line stats
+		self.pdf.set_font('Arial', '', 12)
+		stats = [
+			('Total lines', str(data.getTotalLOC())),
+			('Lines added', str(data.total_lines_added)),
+			('Lines removed', str(data.total_lines_removed)),
+			('Net lines', str(data.total_lines_added - data.total_lines_removed)),
+		]
+		
+		for label, value in stats:
+			self.pdf.cell(50, 8, f"{label}:", 0, 0, 'L')
+			self.pdf.cell(0, 8, str(value), 0, 1, 'L')
+		
+		self.pdf.ln(10)
+		
+		# Lines by year
+		if hasattr(data, 'commits_by_year') and data.commits_by_year:
+			self.pdf.set_font('Arial', 'B', 14)
+			self.pdf.cell(0, 10, 'Activity by Year', 0, 1, 'L')
+			
+			# Table header
+			self.pdf.set_font('Arial', 'B', 10)
+			self.pdf.cell(25, 8, 'Year', 1, 0, 'C')
+			self.pdf.cell(30, 8, 'Commits', 1, 0, 'C')
+			self.pdf.cell(30, 8, '% of Total', 1, 0, 'C')
+			self.pdf.cell(35, 8, 'Lines Added', 1, 0, 'C')
+			self.pdf.cell(35, 8, 'Lines Removed', 1, 1, 'C')
+			
+			# Table data
+			self.pdf.set_font('Arial', '', 9)
+			total_commits = data.getTotalCommits()
+			
+			for yy in sorted(data.commits_by_year.keys(), reverse=True):
+				commits = data.commits_by_year.get(yy, 0)
+				percent = (100.0 * commits / total_commits) if total_commits else 0.0
+				lines_added = data.lines_added_by_year.get(yy, 0) if hasattr(data, 'lines_added_by_year') else 0
+				lines_removed = data.lines_removed_by_year.get(yy, 0) if hasattr(data, 'lines_removed_by_year') else 0
+				
+				self.pdf.cell(25, 6, str(yy), 1, 0, 'C')
+				self.pdf.cell(30, 6, str(commits), 1, 0, 'C')
+				self.pdf.cell(30, 6, f"{percent:.1f}%", 1, 0, 'C')
+				self.pdf.cell(35, 6, str(lines_added), 1, 0, 'C')
+				self.pdf.cell(35, 6, str(lines_removed), 1, 1, 'C')
+		
+		self.pdf.ln(10)
+		
+		# Lines of code chart
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Lines of Code Over Time', 0, 1, 'L')
+		self._add_chart_if_exists('lines_of_code.png', 180, 100)
+	
+	def _create_tags_page(self, data):
+		"""Create the tags statistics page (mirrors tags.html)."""
+		self.pdf.add_page()
+		self.pdf.set_font('Arial', 'B', 20)
+		self.pdf.cell(0, 15, '6. Tags Statistics', 0, 1, 'L')
+		
+		self.pdf.set_font('Arial', '', 12)
+		
+		if not hasattr(data, 'tags') or not data.tags:
+			self.pdf.cell(0, 10, 'No tags found in repository.', 0, 1, 'L')
+			return
+		
+		# Basic tag stats
+		total_tags = len(data.tags)
+		avg_commits_per_tag = (1.0 * data.getTotalCommits() / total_tags) if total_tags else 0.0
+		
+		stats = [
+			('Total tags', str(total_tags)),
+			('Average commits per tag', f"{avg_commits_per_tag:.2f}"),
+		]
+		
+		for label, value in stats:
+			self.pdf.cell(50, 8, f"{label}:", 0, 0, 'L')
+			self.pdf.cell(0, 8, str(value), 0, 1, 'L')
+		
+		self.pdf.ln(10)
+		
+		# Tags table
+		if hasattr(data, 'tags') and data.tags:
+			self.pdf.set_font('Arial', 'B', 12)
+			self.pdf.cell(0, 10, 'List of Tags', 0, 1, 'L')
+			
+			# Table header
+			self.pdf.set_font('Arial', 'B', 10)
+			self.pdf.cell(40, 8, 'Tag', 1, 0, 'C')
+			self.pdf.cell(30, 8, 'Date', 1, 0, 'C')
+			self.pdf.cell(30, 8, 'Commits', 1, 0, 'C')
+			self.pdf.cell(50, 8, 'Author', 1, 1, 'C')
+			
+			# Table data
+			self.pdf.set_font('Arial', '', 9)
+			tag_list = sorted(data.tags.items(), key=lambda x: x[1]['date'], reverse=True)
+			
+			for tag, tag_data in tag_list[:20]:  # Show top 20 tags
+				self.pdf.cell(40, 6, tag[:20], 1, 0, 'L')
+				self.pdf.cell(30, 6, tag_data.get('date', 'N/A')[:10], 1, 0, 'C')
+				self.pdf.cell(30, 6, str(tag_data.get('commits', 0)), 1, 0, 'C')
+				author = tag_data.get('author', 'N/A')[:25]
+				self.pdf.cell(50, 6, author, 1, 1, 'L')
+		
+		# Tags table
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Recent Tags', 0, 1, 'L')
+		
+		# Table header
+		self.pdf.set_font('Arial', 'B', 10)
+		self.pdf.cell(40, 8, 'Tag Name', 1, 0, 'C')
+		self.pdf.cell(30, 8, 'Date', 1, 0, 'C')
+		self.pdf.cell(25, 8, 'Commits', 1, 0, 'C')
+		self.pdf.cell(80, 8, 'Top Authors', 1, 1, 'C')
+		
+		# Sort tags by date (most recent first)
+		tags_sorted_by_date_desc = list(map(lambda el : el[1], 
+										  reversed(sorted(map(lambda el : (el[1]['date'], el[0]), 
+														  data.tags.items())))))
+		
+		# Show up to 20 most recent tags
+		self.pdf.set_font('Arial', '', 8)
+		for tag in tags_sorted_by_date_desc[:20]:
+			tag_info = data.tags[tag]
+			
+			# Get top authors for this tag
+			if 'authors' in tag_info:
+				authors = sorted(tag_info['authors'].items(), 
+							   key=lambda x: x[1], reverse=True)[:3]
+				author_list = ', '.join([f"{author}({commits})" for author, commits in authors])
+			else:
+				author_list = ''
+			
+			# Truncate long names
+			display_tag = tag[:18] + "..." if len(tag) > 21 else tag
+			display_authors = author_list[:35] + "..." if len(author_list) > 38 else author_list
+			
+			self.pdf.cell(40, 6, display_tag, 1, 0, 'L')
+			self.pdf.cell(30, 6, tag_info['date'][:10], 1, 0, 'C')
+			self.pdf.cell(25, 6, str(tag_info['commits']), 1, 0, 'C')
+			self.pdf.cell(80, 6, display_authors, 1, 1, 'L')
+		
 		
 def usage():
 	print("""
@@ -1426,6 +1946,16 @@ Usage: gitstats [options] <gitpath..> <outputpath>
 
 Options:
 -c key=value     Override configuration value
+
+Available output formats (use -c output_format=<format>):
+  html           Generate HTML report only (default)
+  pdf            Generate PDF report only  
+  both           Generate both HTML and PDF reports
+
+Examples:
+  gitstats repo output                    # HTML report
+  gitstats -c output_format=pdf repo output    # PDF report
+  gitstats -c output_format=both repo output   # Both formats
 
 Default config values:
 %s
@@ -1493,16 +2023,30 @@ class GitStats:
 		os.chdir(rundir)
 
 		print('Generating report...')
-		report = HTMLReportCreator()
-		report.create(data, outputpath)
+		
+		# Generate reports based on output_format configuration
+		if conf['output_format'] in ('html', 'both'):
+			print('Creating HTML report...')
+			html_report = HTMLReportCreator()
+			html_report.create(data, outputpath)
+		
+		if conf['output_format'] in ('pdf', 'both'):
+			print('Creating PDF report...')
+			pdf_report = PDFReportCreator()
+			pdf_report.create(data, outputpath)
 
 		time_end = time.time()
 		exectime_internal = time_end - time_start
 		print('Execution time %.5f secs, %.5f secs (%.2f %%) in external commands)' % (exectime_internal, exectime_external, (100.0 * exectime_external) / exectime_internal))
+		
 		if sys.stdin.isatty():
 			print('You may now run:')
 			print()
-			print('   sensible-browser \'%s\'' % os.path.join(outputpath, 'index.html').replace("'", "'\\''"))
+			if conf['output_format'] in ('html', 'both'):
+				print('   sensible-browser \'%s\'' % os.path.join(outputpath, 'index.html').replace("'", "'\\''"))
+			if conf['output_format'] in ('pdf', 'both'):
+				pdf_filename = f"gitstats_{data.projectname.replace(' ', '_')}.pdf"
+				print('   PDF report: \'%s\'' % os.path.join(outputpath, pdf_filename).replace("'", "'\\''"))
 			print()
 
 if __name__=='__main__':
