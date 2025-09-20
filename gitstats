@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import zlib
+from collections import defaultdict
 from fpdf import FPDF
 
 if sys.version_info < (3, 6):
@@ -49,13 +50,14 @@ conf = {
 	'project_name': '',
 	'processes': 8,
 	'start_date': '',
-	'output_format': 'html'  # 'html', 'pdf', or 'both'
+	'debug': False,
+	'verbose': False
 }
 
 def getpipeoutput(cmds, quiet = False):
 	global exectime_external
 	start = time.time()
-	if not quiet and ON_LINUX and os.isatty(1):
+	if (not quiet and ON_LINUX and os.isatty(1)) or conf['verbose']:
 		print('>> ' + ' | '.join(cmds), end='')
 		sys.stdout.flush()
 	p = subprocess.Popen(cmds[0], stdout = subprocess.PIPE, shell = True)
@@ -67,10 +69,12 @@ def getpipeoutput(cmds, quiet = False):
 	for p in processes:
 		p.wait()
 	end = time.time()
-	if not quiet:
+	if not quiet or conf['verbose'] or conf['debug']:
 		if ON_LINUX and os.isatty(1):
 			print('\r', end='')
 		print('[%.5f] >> %s' % (end - start, ' | '.join(cmds)))
+	if conf['debug']:
+		print(f'DEBUG: Command output ({len(output)} bytes): {output[:200].decode("utf-8", errors="replace")}...')
 	exectime_external += (end - start)
 	return output.decode('utf-8', errors='replace').rstrip('\n')
 
@@ -135,19 +139,66 @@ def getnumoflinesinblob(ext_blob):
 	ext, blob_id = ext_blob
 	return (ext, blob_id, int(getpipeoutput(['git cat-file blob %s' % blob_id, 'wc -l']).split()[0]))
 
+def analyzesloc(ext_blob):
+	"""
+	Analyze source lines of code vs comments vs blank lines in a blob
+	Returns (ext, blob_id, total_lines, source_lines, comment_lines, blank_lines)
+	"""
+	ext, blob_id = ext_blob
+	content = getpipeoutput(['git cat-file blob %s' % blob_id])
+	
+	total_lines = 0
+	source_lines = 0
+	comment_lines = 0
+	blank_lines = 0
+	
+	# Define comment patterns for different file types
+	comment_patterns = {
+		'.py': [r'^\s*#', r'^\s*"""', r'^\s*\'\'\''],
+		'.js': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+		'.ts': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+		'.java': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+		'.cpp': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+		'.c': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+		'.h': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+		'.css': [r'^\s*/\*', r'^\s*\*'],
+		'.html': [r'^\s*<!--', r'^\s*<!\-\-'],
+		'.xml': [r'^\s*<!--', r'^\s*<!\-\-'],
+		'.sh': [r'^\s*#'],
+		'.rb': [r'^\s*#'],
+		'.pl': [r'^\s*#'],
+		'.php': [r'^\s*//', r'^\s*/\*', r'^\s*\*', r'^\s*#'],
+	}
+	
+	import re
+	patterns = comment_patterns.get(ext, [])
+	
+	for line in content.split('\n'):
+		total_lines += 1
+		line_stripped = line.strip()
+		
+		if not line_stripped:
+			blank_lines += 1
+		elif any(re.match(pattern, line) for pattern in patterns):
+			comment_lines += 1
+		else:
+			source_lines += 1
+	
+	return (ext, blob_id, total_lines, source_lines, comment_lines, blank_lines)
+
 class DataCollector:
 	"""Manages data collection from a revision control repository."""
 	def __init__(self):
 		self.stamp_created = time.time()
 		self.cache = {}
 		self.total_authors = 0
-		self.activity_by_hour_of_day = {} # hour -> commits
-		self.activity_by_day_of_week = {} # day -> commits
-		self.activity_by_month_of_year = {} # month [1-12] -> commits
-		self.activity_by_hour_of_week = {} # weekday -> hour -> commits
+		self.activity_by_hour_of_day = defaultdict(int) # hour -> commits
+		self.activity_by_day_of_week = defaultdict(int) # day -> commits
+		self.activity_by_month_of_year = defaultdict(int) # month [1-12] -> commits
+		self.activity_by_hour_of_week = defaultdict(lambda: defaultdict(int)) # weekday -> hour -> commits
 		self.activity_by_hour_of_day_busiest = 0
 		self.activity_by_hour_of_week_busiest = 0
-		self.activity_by_year_week = {} # yy_wNN -> commits
+		self.activity_by_year_week = defaultdict(int) # yy_wNN -> commits
 		self.activity_by_year_week_peak = 0
 
 		self.authors = {} # name -> {commits, first_commit_stamp, last_commit_stamp, last_active_day, active_days, lines_added, lines_removed}
@@ -157,17 +208,17 @@ class DataCollector:
 		self.authors_by_commits = 0
 
 		# domains
-		self.domains = {} # domain -> commits
+		self.domains = defaultdict(lambda: defaultdict(int)) # domain -> commits
 
 		# author of the month
-		self.author_of_month = {} # month -> author -> commits
-		self.author_of_year = {} # year -> author -> commits
-		self.commits_by_month = {} # month -> commits
-		self.commits_by_year = {} # year -> commits
-		self.lines_added_by_month = {} # month -> lines added
-		self.lines_added_by_year = {} # year -> lines added
-		self.lines_removed_by_month = {} # month -> lines removed
-		self.lines_removed_by_year = {} # year -> lines removed
+		self.author_of_month = defaultdict(lambda: defaultdict(int)) # month -> author -> commits
+		self.author_of_year = defaultdict(lambda: defaultdict(int)) # year -> author -> commits
+		self.commits_by_month = defaultdict(int) # month -> commits
+		self.commits_by_year = defaultdict(int) # year -> commits
+		self.lines_added_by_month = defaultdict(int) # month -> lines added
+		self.lines_added_by_year = defaultdict(int) # year -> lines added
+		self.lines_removed_by_month = defaultdict(int) # month -> lines removed
+		self.lines_removed_by_year = defaultdict(int) # year -> lines removed
 		self.first_commit_stamp = 0
 		self.last_commit_stamp = 0
 		self.last_active_day = None
@@ -177,12 +228,26 @@ class DataCollector:
 		self.total_lines = 0
 		self.total_lines_added = 0
 		self.total_lines_removed = 0
+		
+		# SLOC (Source Lines of Code) analysis
+		self.total_source_lines = 0
+		self.total_comment_lines = 0
+		self.total_blank_lines = 0
+		self.sloc_by_extension = {} # ext -> {'source': 0, 'comments': 0, 'blank': 0, 'total': 0}
+		
+		# File size and revision tracking
+		self.file_sizes = {} # filepath -> size in bytes
+		self.file_revisions = {} # filepath -> revision count
+
+		# Directory activity tracking
+		self.directories = defaultdict(lambda: {'commits': 0, 'lines_added': 0, 'lines_removed': 0, 'files': set()})
+		self.directory_revisions = defaultdict(int) # directory -> total file revisions in directory
 
 		# size
 		self.total_size = 0
 
 		# timezone
-		self.commits_by_timezone = {} # timezone -> commits
+		self.commits_by_timezone = defaultdict(int) # timezone -> commits
 
 		# tags
 		self.tags = {}
@@ -194,6 +259,22 @@ class DataCollector:
 
 		# line statistics
 		self.changes_by_date = {} # stamp -> { files, ins, del }
+		
+		# Pace of Changes tracking (number of line changes happening over time)
+		self.pace_of_changes = {} # stamp -> total_line_changes (ins + del)
+		
+		# Last 30 days activity
+		self.last_30_days_commits = 0
+		self.last_30_days_lines_added = 0
+		self.last_30_days_lines_removed = 0
+		
+		# Last 12 months activity  
+		self.last_12_months_commits = defaultdict(int) # month -> commits
+		self.last_12_months_lines_added = defaultdict(int) # month -> lines added
+		self.last_12_months_lines_removed = defaultdict(int) # month -> lines removed
+		
+		# Repository size tracking
+		self.repository_size_mb = 0.0
 
 	##
 	# This should be the main function to extract data from the repository.
@@ -291,6 +372,13 @@ class GitDataCollector(DataCollector):
 		self.total_authors += int(getpipeoutput(['git shortlog -s %s' % getlogrange(), 'wc -l']))
 		#self.total_lines = int(getoutput('git-ls-files -z |xargs -0 cat |wc -l'))
 
+		# Clear tags for each repository to avoid multirepo contamination
+		if not hasattr(self, '_first_repo'):
+			self._first_repo = True
+		else:
+			# For subsequent repos, clear tags to avoid mixing
+			self.tags = {}
+
 		# tags
 		lines = getpipeoutput(['git show-ref --tags']).split('\n')
 		for line in lines:
@@ -355,42 +443,40 @@ class GitDataCollector(DataCollector):
 			# activity
 			# hour
 			hour = date.hour
-			self.activity_by_hour_of_day[hour] = self.activity_by_hour_of_day.get(hour, 0) + 1
+			self.activity_by_hour_of_day[hour] += 1
 			# most active hour?
 			if self.activity_by_hour_of_day[hour] > self.activity_by_hour_of_day_busiest:
 				self.activity_by_hour_of_day_busiest = self.activity_by_hour_of_day[hour]
 
 			# day of week
 			day = date.weekday()
-			self.activity_by_day_of_week[day] = self.activity_by_day_of_week.get(day, 0) + 1
+			self.activity_by_day_of_week[day] += 1
 
 			# domain stats
 			if domain not in self.domains:
-				self.domains[domain] = {}
+				self.domains[domain] = defaultdict(int)
 			# commits
-			self.domains[domain]['commits'] = self.domains[domain].get('commits', 0) + 1
+			self.domains[domain]['commits'] += 1
 
-			# hour of week
-			if day not in self.activity_by_hour_of_week:
-				self.activity_by_hour_of_week[day] = {}
-			self.activity_by_hour_of_week[day][hour] = self.activity_by_hour_of_week[day].get(hour, 0) + 1
+			# hour of week  
+			self.activity_by_hour_of_week[day][hour] += 1
 			# most active hour?
 			if self.activity_by_hour_of_week[day][hour] > self.activity_by_hour_of_week_busiest:
 				self.activity_by_hour_of_week_busiest = self.activity_by_hour_of_week[day][hour]
 
 			# month of year
 			month = date.month
-			self.activity_by_month_of_year[month] = self.activity_by_month_of_year.get(month, 0) + 1
+			self.activity_by_month_of_year[month] += 1
 
 			# yearly/weekly activity
 			yyw = date.strftime('%Y-%W')
-			self.activity_by_year_week[yyw] = self.activity_by_year_week.get(yyw, 0) + 1
+			self.activity_by_year_week[yyw] += 1
 			if self.activity_by_year_week_peak < self.activity_by_year_week[yyw]:
 				self.activity_by_year_week_peak = self.activity_by_year_week[yyw]
 
 			# author stats
 			if author not in self.authors:
-				self.authors[author] = {}
+				self.authors[author] = { 'lines_added' : 0, 'lines_removed' : 0, 'commits' : 0}
 			# commits, note again that commits may be in any date order because of cherry-picking and patches
 			if 'last_commit_stamp' not in self.authors[author]:
 				self.authors[author]['last_commit_stamp'] = stamp
@@ -403,20 +489,12 @@ class GitDataCollector(DataCollector):
 
 			# author of the month/year
 			yymm = date.strftime('%Y-%m')
-			if yymm in self.author_of_month:
-				self.author_of_month[yymm][author] = self.author_of_month[yymm].get(author, 0) + 1
-			else:
-				self.author_of_month[yymm] = {}
-				self.author_of_month[yymm][author] = 1
-			self.commits_by_month[yymm] = self.commits_by_month.get(yymm, 0) + 1
+			self.author_of_month[yymm][author] += 1
+			self.commits_by_month[yymm] += 1
 
 			yy = date.year
-			if yy in self.author_of_year:
-				self.author_of_year[yy][author] = self.author_of_year[yy].get(author, 0) + 1
-			else:
-				self.author_of_year[yy] = {}
-				self.author_of_year[yy][author] = 1
-			self.commits_by_year[yy] = self.commits_by_year.get(yy, 0) + 1
+			self.author_of_year[yy][author] += 1
+			self.commits_by_year[yy] += 1
 
 			# authors: active days
 			yymmdd = date.strftime('%Y-%m-%d')
@@ -433,7 +511,7 @@ class GitDataCollector(DataCollector):
 				self.active_days.add(yymmdd)
 
 			# timezone
-			self.commits_by_timezone[timezone] = self.commits_by_timezone.get(timezone, 0) + 1
+			self.commits_by_timezone[timezone] += 1
 
 		# outputs "<stamp> <files>" for each revision
 		revlines = getpipeoutput(['git rev-list --pretty=format:"%%at %%T" %s' % getlogrange('HEAD'), 'grep -v ^commit']).strip().split('\n')
@@ -494,6 +572,9 @@ class GitDataCollector(DataCollector):
 
 			self.total_size += size
 			self.total_files += 1
+			
+			# Track individual file sizes
+			self.file_sizes[fullpath] = size
 
 			filename = fullpath.split('/')[-1] # strip directories
 			if filename.find('.') == -1 or filename.rfind('.') == 0:
@@ -521,12 +602,90 @@ class GitDataCollector(DataCollector):
 		pool.terminate()
 		pool.join()
 
+		# Also get SLOC analysis for the same blobs
+		pool = Pool(processes=conf['processes'])
+		ext_blob_sloc = pool.map(analyzesloc, blobs_to_read)
+		pool.terminate()
+		pool.join()
+
 		#Update cache and write down info about number of number of lines
 		for (ext, blob_id, linecount) in ext_blob_linecount:
 			if 'lines_in_blob' not in self.cache:
 				self.cache['lines_in_blob'] = {}
 			self.cache['lines_in_blob'][blob_id] = linecount
 			self.extensions[ext]['lines'] += self.cache['lines_in_blob'][blob_id]
+
+		# Update SLOC statistics
+		for (ext, blob_id, total_lines, source_lines, comment_lines, blank_lines) in ext_blob_sloc:
+			# Initialize extension SLOC tracking
+			if ext not in self.sloc_by_extension:
+				self.sloc_by_extension[ext] = {'source': 0, 'comments': 0, 'blank': 0, 'total': 0}
+			
+			# Update extension SLOC counts
+			self.sloc_by_extension[ext]['source'] += source_lines
+			self.sloc_by_extension[ext]['comments'] += comment_lines
+			self.sloc_by_extension[ext]['blank'] += blank_lines
+			self.sloc_by_extension[ext]['total'] += total_lines
+			
+			# Update global SLOC counts
+			self.total_source_lines += source_lines
+			self.total_comment_lines += comment_lines
+			self.total_blank_lines += blank_lines
+
+		# File revision counting
+		print('Collecting file revision statistics...')
+		revision_lines = getpipeoutput(['git log --name-only --pretty=format: %s' % getlogrange('HEAD')]).strip().split('\n')
+		for line in revision_lines:
+			line = line.strip()
+			if len(line) > 0 and not line.startswith('commit'):
+				# This is a filename
+				if line not in self.file_revisions:
+					self.file_revisions[line] = 0
+				self.file_revisions[line] += 1
+				
+				# Track directory activity
+				directory = os.path.dirname(line) if os.path.dirname(line) else '.'
+				self.directory_revisions[directory] += 1
+				self.directories[directory]['files'].add(line)
+
+		# Directory activity analysis
+		print('Collecting directory activity statistics...')
+		numstat_lines = getpipeoutput(['git log --numstat --pretty=format:"%%at %%aN" %s' % getlogrange('HEAD')]).split('\n')
+		current_author = None
+		current_timestamp = None
+		
+		for line in numstat_lines:
+			line = line.strip()
+			if not line:
+				continue
+				
+			# Check if this is a commit header line (timestamp + author)
+			if line.count('\t') == 0 and ' ' in line:
+				try:
+					parts = line.split(' ', 1)
+					current_timestamp = int(parts[0])
+					current_author = parts[1]
+					continue
+				except (ValueError, IndexError):
+					pass
+			
+			# Check if this is a numstat line (additions\tdeletions\tfilename)
+			if line.count('\t') >= 2:
+				parts = line.split('\t')
+				if len(parts) >= 3:
+					try:
+						additions = int(parts[0]) if parts[0] != '-' else 0
+						deletions = int(parts[1]) if parts[1] != '-' else 0
+						filename = '\t'.join(parts[2:])  # Handle filenames with tabs
+						
+						# Track directory activity
+						directory = os.path.dirname(filename) if os.path.dirname(filename) else '.'
+						self.directories[directory]['commits'] += 1  # Will be deduplicated later
+						self.directories[directory]['lines_added'] += additions
+						self.directories[directory]['lines_removed'] += deletions
+						self.directories[directory]['files'].add(filename)
+					except ValueError:
+						pass
 
 		# line statistics
 		# outputs:
@@ -553,15 +712,34 @@ class GitDataCollector(DataCollector):
 					try:
 						(stamp, author) = (int(line[:pos]), line[pos+1:])
 						self.changes_by_date[stamp] = { 'files': files, 'ins': inserted, 'del': deleted, 'lines': total_lines }
+						
+						# Track pace of changes (total line changes)
+						self.pace_of_changes[stamp] = inserted + deleted
 
 						date = datetime.datetime.fromtimestamp(stamp)
+						
+						# Track last 30 days activity
+						import time as time_mod
+						now = time_mod.time()
+						if now - stamp <= 30 * 24 * 3600:  # 30 days in seconds
+							self.last_30_days_commits += 1
+							self.last_30_days_lines_added += inserted
+							self.last_30_days_lines_removed += deleted
+						
+						# Track last 12 months activity
+						if now - stamp <= 365 * 24 * 3600:  # 12 months in seconds
+							yymm = date.strftime('%Y-%m')
+							self.last_12_months_commits[yymm] += 1
+							self.last_12_months_lines_added[yymm] += inserted
+							self.last_12_months_lines_removed[yymm] += deleted
+						
 						yymm = date.strftime('%Y-%m')
-						self.lines_added_by_month[yymm] = self.lines_added_by_month.get(yymm, 0) + inserted
-						self.lines_removed_by_month[yymm] = self.lines_removed_by_month.get(yymm, 0) + deleted
+						self.lines_added_by_month[yymm] += inserted
+						self.lines_removed_by_month[yymm] += deleted
 
 						yy = date.year
-						self.lines_added_by_year[yy] = self.lines_added_by_year.get(yy,0) + inserted
-						self.lines_removed_by_year[yy] = self.lines_removed_by_year.get(yy, 0) + deleted
+						self.lines_added_by_year[yy] += inserted
+						self.lines_removed_by_year[yy] += deleted
 
 						files, inserted, deleted = 0, 0, 0
 					except ValueError:
@@ -613,9 +791,9 @@ class GitDataCollector(DataCollector):
 							stamp = oldstamp
 						if author not in self.authors:
 							self.authors[author] = { 'lines_added' : 0, 'lines_removed' : 0, 'commits' : 0}
-						self.authors[author]['commits'] = self.authors[author].get('commits', 0) + 1
-						self.authors[author]['lines_added'] = self.authors[author].get('lines_added', 0) + inserted
-						self.authors[author]['lines_removed'] = self.authors[author].get('lines_removed', 0) + deleted
+						self.authors[author]['commits'] += 1
+						self.authors[author]['lines_added'] += inserted
+						self.authors[author]['lines_removed'] += deleted
 						if stamp not in self.changes_by_date_by_author:
 							self.changes_by_date_by_author[stamp] = {}
 						if author not in self.changes_by_date_by_author[stamp]:
@@ -635,6 +813,19 @@ class GitDataCollector(DataCollector):
 				else:
 					print('Warning: failed to handle line "%s"' % line)
 					(files, inserted, deleted) = (0, 0, 0)
+		
+		# Calculate repository size (this is slow as noted in TODO)
+		if conf['verbose']:
+			print('Calculating repository size...')
+		try:
+			# Get .git directory size
+			git_dir_size = getpipeoutput(['du -sm .git']).split()[0]
+			self.repository_size_mb = float(git_dir_size)
+			if conf['verbose']:
+				print(f'Repository size: {self.repository_size_mb:.1f} MB')
+		except (ValueError, IndexError):
+			print('Warning: Could not calculate repository size')
+			self.repository_size_mb = 0.0
 	
 	def refine(self):
 		# authors
@@ -707,8 +898,84 @@ class GitDataCollector(DataCollector):
 	def getTotalLOC(self):
 		return self.total_lines
 
+	def getTotalSourceLines(self):
+		return self.total_source_lines
+	
+	def getTotalCommentLines(self):
+		return self.total_comment_lines
+	
+	def getTotalBlankLines(self):
+		return self.total_blank_lines
+	
+	def getSLOCByExtension(self):
+		return self.sloc_by_extension
+	
+	def getLargestFiles(self, limit=10):
+		"""Get the largest files by size."""
+		sorted_files = sorted(self.file_sizes.items(), key=lambda x: x[1], reverse=True)
+		return sorted_files[:limit]
+	
+	def getFilesWithMostRevisions(self, limit=10):
+		"""Get files with most revisions (hotspots)."""
+		sorted_files = sorted(self.file_revisions.items(), key=lambda x: x[1], reverse=True)
+		return sorted_files[:limit]
+	
+	def getAverageFileSize(self):
+		"""Get average file size in bytes."""
+		if not self.file_sizes:
+			return 0.0
+		return sum(self.file_sizes.values()) / len(self.file_sizes)
+	
+	def getDirectoriesByActivity(self, limit=10):
+		"""Get directories with most lines changed (added + removed)."""
+		if not hasattr(self, 'directories'):
+			return []
+		directory_activity = []
+		for directory, stats in self.directories.items():
+			total_lines = stats['lines_added'] + stats['lines_removed']
+			file_count = len(stats['files'])
+			directory_activity.append((directory, total_lines, stats['lines_added'], stats['lines_removed'], file_count))
+		return sorted(directory_activity, key=lambda x: x[1], reverse=True)[:limit]
+	
+	def getDirectoriesByRevisions(self, limit=10):
+		"""Get directories with most file revisions."""
+		if not hasattr(self, 'directory_revisions'):
+			return []
+		sorted_dirs = sorted(self.directory_revisions.items(), key=lambda x: x[1], reverse=True)
+		return sorted_dirs[:limit]
+	
+	def getAverageRevisionsPerFile(self):
+		"""Get average number of revisions per file."""
+		if not self.file_revisions:
+			return 0.0
+		return sum(self.file_revisions.values()) / len(self.file_revisions)
+
 	def getTotalSize(self):
 		return self.total_size
+	
+	def getLast30DaysActivity(self):
+		"""Get activity stats for last 30 days."""
+		return {
+			'commits': self.last_30_days_commits,
+			'lines_added': self.last_30_days_lines_added,
+			'lines_removed': self.last_30_days_lines_removed
+		}
+	
+	def getLast12MonthsActivity(self):
+		"""Get activity stats for last 12 months."""
+		return {
+			'commits': dict(self.last_12_months_commits),
+			'lines_added': dict(self.last_12_months_lines_added),
+			'lines_removed': dict(self.last_12_months_lines_removed)
+		}
+	
+	def getPaceOfChanges(self):
+		"""Get pace of changes (line changes over time)."""
+		return self.pace_of_changes
+	
+	def getRepositorySize(self):
+		"""Get repository size in MB."""
+		return getattr(self, 'repository_size_mb', 0.0)
 	
 	def revToDate(self, rev):
 		stamp = int(getpipeoutput(['git log --pretty=format:%%at "%s" -n 1' % rev]))
@@ -774,7 +1041,27 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<dt>Report Period</dt><dd>%s to %s</dd>' % (data.getFirstCommitDate().strftime(format), data.getLastCommitDate().strftime(format)))
 		f.write('<dt>Age</dt><dd>%d days, %d active days (%3.2f%%)</dd>' % (data.getCommitDeltaDays(), total_active_days, (100.0 * total_active_days / data.getCommitDeltaDays()) if data.getCommitDeltaDays() else 0.0))
 		f.write('<dt>Total Files</dt><dd>%s</dd>' % data.getTotalFiles())
+		# Add file statistics
+		try:
+			avg_size = data.getAverageFileSize()
+			f.write('<dt>Average File Size</dt><dd>%.2f bytes (%.1f KB)</dd>' % (avg_size, avg_size / 1024))
+		except:
+			pass
+		try:
+			avg_revisions = data.getAverageRevisionsPerFile()
+			f.write('<dt>Average Revisions per File</dt><dd>%.2f</dd>' % avg_revisions)
+		except:
+			pass
+		try:
+			repo_size = data.getRepositorySize()
+			if repo_size > 0:
+				f.write('<dt>Repository Size</dt><dd>%.1f MB</dd>' % repo_size)
+		except:
+			pass
 		f.write('<dt>Total Lines of Code</dt><dd>%s (%d added, %d removed)</dd>' % (data.getTotalLOC(), data.total_lines_added, data.total_lines_removed))
+		f.write('<dt>Source Lines of Code</dt><dd>%s (%.1f%%)</dd>' % (data.getTotalSourceLines(), (100.0 * data.getTotalSourceLines() / data.getTotalLOC()) if data.getTotalLOC() else 0.0))
+		f.write('<dt>Comment Lines</dt><dd>%s (%.1f%%)</dd>' % (data.getTotalCommentLines(), (100.0 * data.getTotalCommentLines() / data.getTotalLOC()) if data.getTotalLOC() else 0.0))
+		f.write('<dt>Blank Lines</dt><dd>%s (%.1f%%)</dd>' % (data.getTotalBlankLines(), (100.0 * data.getTotalBlankLines() / data.getTotalLOC()) if data.getTotalLOC() else 0.0))
 		avg_active = float(total_commits) / total_active_days if total_active_days else 0.0
 		avg_all = float(total_commits) / delta_days if delta_days else 0.0
 		f.write('<dt>Total Commits</dt><dd>%s (average %.1f commits per active day, %.1f per all days)</dd>' % (total_commits, avg_active, avg_all))
@@ -792,9 +1079,52 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<h1>Activity</h1>')
 		self.printNav(f)
 
-		#f.write('<h2>Last 30 days</h2>')
+		# Last 30 days
+		f.write(html_header(2, 'Last 30 Days'))
+		last_30_days = data.getLast30DaysActivity()
+		f.write('<dl>')
+		f.write('<dt>Commits</dt><dd>%d</dd>' % last_30_days['commits'])
+		f.write('<dt>Lines added</dt><dd>%d</dd>' % last_30_days['lines_added'])
+		f.write('<dt>Lines removed</dt><dd>%d</dd>' % last_30_days['lines_removed'])
+		f.write('<dt>Net lines</dt><dd>%d</dd>' % (last_30_days['lines_added'] - last_30_days['lines_removed']))
+		f.write('</dl>')
 
-		#f.write('<h2>Last 12 months</h2>')
+		# Last 12 months
+		f.write(html_header(2, 'Last 12 Months'))
+		last_12_months = data.getLast12MonthsActivity()
+		if last_12_months['commits']:
+			f.write('<table class="sortable" id="last12months">')
+			f.write('<tr><th>Month</th><th>Commits</th><th>Lines Added</th><th>Lines Removed</th><th>Net Lines</th></tr>')
+			
+			# Sort months in reverse chronological order
+			sorted_months = sorted(last_12_months['commits'].keys(), reverse=True)
+			for month in sorted_months:
+				commits = last_12_months['commits'][month]
+				lines_added = last_12_months['lines_added'].get(month, 0)
+				lines_removed = last_12_months['lines_removed'].get(month, 0)
+				net_lines = lines_added - lines_removed
+				
+				f.write('<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td></tr>' % 
+					(month, commits, lines_added, lines_removed, net_lines))
+			
+			f.write('</table>')
+		else:
+			f.write('<p>No activity in the last 12 months.</p>')
+
+		# Pace of Changes
+		f.write(html_header(2, 'Pace of Changes'))
+		f.write('<p>Number of line changes (additions + deletions) over time</p>')
+		pace_data = data.getPaceOfChanges()
+		if pace_data:
+			f.write('<img src="pace_of_changes.png" alt="Pace of Changes">')
+			
+			# Generate pace of changes data file
+			fg = open(path + '/pace_of_changes.dat', 'w')
+			for stamp in sorted(pace_data.keys()):
+				fg.write('%d %d\n' % (stamp, pace_data[stamp]))
+			fg.close()
+		else:
+			f.write('<p>No pace data available.</p>')
 
 		# Weekly activity
 		WEEKS = 32
@@ -1097,9 +1427,16 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<dt>Total files</dt><dd>%d</dd>' % data.getTotalFiles())
 		f.write('<dt>Total lines</dt><dd>%d</dd>' % data.getTotalLOC())
 		try:
+			avg_size = data.getAverageFileSize()
+			f.write('<dt>Average file size</dt><dd>%.2f bytes</dd>' % avg_size)
+		except (AttributeError, ZeroDivisionError):
+			# Fallback to old calculation if new method fails
 			avg_size = float(data.getTotalSize()) / data.getTotalFiles() if data.getTotalFiles() else 0.0
-			f.write('<dt>Average file size</dt><dd>%.2f bytes</dd>' % (avg_size))
-		except ZeroDivisionError:
+			f.write('<dt>Average file size</dt><dd>%.2f bytes</dd>' % avg_size)
+		try:
+			avg_revisions = data.getAverageRevisionsPerFile()
+			f.write('<dt>Average revisions per file</dt><dd>%.2f</dd>' % avg_revisions)
+		except AttributeError:
 			pass
 		f.write('</dl>\n')
 
@@ -1134,6 +1471,64 @@ class HTMLReportCreator(ReportCreator):
 			f.write('<tr><td>%s</td><td>%d (%.2f%%)</td><td>%d (%.2f%%)</td><td>%d</td></tr>' % (ext, files, files_percentage, lines, loc_percentage, lines_per_file))
 		f.write('</table>')
 
+		# SLOC Breakdown by Extension
+		f.write(html_header(2, 'Source Lines of Code (SLOC) Breakdown'))
+		f.write('<table class="sortable" id="sloc"><tr><th>Extension</th><th>Source Lines (%)</th><th>Comment Lines (%)</th><th>Blank Lines (%)</th><th>Total Lines</th></tr>')
+		sloc_data = data.getSLOCByExtension()
+		for ext in sorted(sloc_data.keys()):
+			if sloc_data[ext]['total'] == 0:
+				continue
+			source = sloc_data[ext]['source']
+			comments = sloc_data[ext]['comments']
+			blank = sloc_data[ext]['blank']
+			total = sloc_data[ext]['total']
+			source_pct = (100.0 * source / total) if total else 0.0
+			comment_pct = (100.0 * comments / total) if total else 0.0
+			blank_pct = (100.0 * blank / total) if total else 0.0
+			f.write('<tr><td>%s</td><td>%d (%.1f%%)</td><td>%d (%.1f%%)</td><td>%d (%.1f%%)</td><td>%d</td></tr>' % 
+				(ext, source, source_pct, comments, comment_pct, blank, blank_pct, total))
+		f.write('</table>')
+
+		# Largest Files
+		try:
+			largest_files = data.getLargestFiles(15)
+			if largest_files:
+				f.write(html_header(2, 'Largest Files'))
+				f.write('<table class="sortable" id="largest_files"><tr><th>File</th><th>Size (bytes)</th><th>Size (KB)</th></tr>')
+				for filepath, size in largest_files:
+					size_kb = size / 1024.0
+					f.write('<tr><td>%s</td><td>%d</td><td>%.1f</td></tr>' % (filepath, size, size_kb))
+				f.write('</table>')
+		except (AttributeError, TypeError):
+			pass
+
+		# Files with Most Revisions (Hotspots)
+		try:
+			hotspot_files = data.getFilesWithMostRevisions(15)
+			if hotspot_files:
+				f.write(html_header(2, 'Files with Most Revisions (Hotspots)'))
+				f.write('<table class="sortable" id="hotspot_files"><tr><th>File</th><th>Revisions</th><th>% of Total Commits</th></tr>')
+				total_commits = data.getTotalCommits()
+				for filepath, revisions in hotspot_files:
+					revision_pct = (100.0 * revisions / total_commits) if total_commits else 0.0
+					f.write('<tr><td>%s</td><td>%d</td><td>%.2f%%</td></tr>' % (filepath, revisions, revision_pct))
+				f.write('</table>')
+		except (AttributeError, TypeError):
+			pass
+
+		# Directory Activity
+		try:
+			active_directories = data.getDirectoriesByActivity(15)
+			if active_directories:
+				f.write(html_header(2, 'Most Active Directories'))
+				f.write('<table class="sortable" id="active_directories"><tr><th>Directory</th><th>Total Lines Changed</th><th>Lines Added</th><th>Lines Removed</th><th>Files</th></tr>')
+				for directory, total_lines, lines_added, lines_removed, file_count in active_directories:
+					directory_display = directory if directory != '.' else '(root)'
+					f.write('<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td></tr>' % (directory_display, total_lines, lines_added, lines_removed, file_count))
+				f.write('</table>')
+		except (AttributeError, TypeError):
+			pass
+
 		f.write('</body></html>')
 		f.close()
 
@@ -1146,15 +1541,59 @@ class HTMLReportCreator(ReportCreator):
 
 		f.write('<dl>\n')
 		f.write('<dt>Total lines</dt><dd>%d</dd>' % data.getTotalLOC())
+		f.write('<dt>Source lines</dt><dd>%d (%.1f%%)</dd>' % (
+			data.getTotalSourceLines(), 
+			(100.0 * data.getTotalSourceLines() / data.getTotalLOC()) if data.getTotalLOC() else 0.0
+		))
+		f.write('<dt>Comment lines</dt><dd>%d (%.1f%%)</dd>' % (
+			data.getTotalCommentLines(),
+			(100.0 * data.getTotalCommentLines() / data.getTotalLOC()) if data.getTotalLOC() else 0.0
+		))
+		f.write('<dt>Blank lines</dt><dd>%d (%.1f%%)</dd>' % (
+			data.getTotalBlankLines(),
+			(100.0 * data.getTotalBlankLines() / data.getTotalLOC()) if data.getTotalLOC() else 0.0
+		))
 		f.write('</dl>\n')
 
 		f.write(html_header(2, 'Lines of Code'))
+		f.write('<p>This chart shows the total lines of code over time, including source code, comments, and blank lines.</p>')
 		f.write('<img src="lines_of_code.png" alt="Lines of Code">')
 
 		fg = open(path + '/lines_of_code.dat', 'w')
 		for stamp in sorted(data.changes_by_date.keys()):
 			fg.write('%d %d\n' % (stamp, data.changes_by_date[stamp]['lines']))
 		fg.close()
+
+		# Add SLOC composition chart data
+		f.write(html_header(2, 'Source Lines of Code (SLOC) Composition'))
+		f.write('<p>Breakdown of code composition by file type and content type:</p>')
+		sloc_data = data.getSLOCByExtension()
+		if sloc_data:
+			f.write('<table class="sortable" id="sloc_breakdown">')
+			f.write('<tr><th>Extension</th><th>Source Lines</th><th>Comment Lines</th><th>Blank Lines</th><th>Total</th><th>Source %</th><th>Comment %</th></tr>')
+			
+			sorted_sloc = sorted(sloc_data.items(), key=lambda x: x[1]['total'], reverse=True)
+			for ext, sloc_info in sorted_sloc[:15]:  # Top 15 extensions
+				if sloc_info['total'] == 0:
+					continue
+				
+				ext_display = ext if ext else '(no extension)'
+				source_pct = (100.0 * sloc_info['source'] / sloc_info['total']) if sloc_info['total'] else 0.0
+				comment_pct = (100.0 * sloc_info['comments'] / sloc_info['total']) if sloc_info['total'] else 0.0
+				
+				f.write('<tr>')
+				f.write('<td>%s</td>' % ext_display)
+				f.write('<td>%d</td>' % sloc_info['source'])
+				f.write('<td>%d</td>' % sloc_info['comments'])
+				f.write('<td>%d</td>' % sloc_info['blank'])
+				f.write('<td>%d</td>' % sloc_info['total'])
+				f.write('<td>%.1f%%</td>' % source_pct)
+				f.write('<td>%.1f%%</td>' % comment_pct)
+				f.write('</tr>')
+			
+			f.write('</table>')
+		else:
+			f.write('<p>No SLOC data available.</p>')
 
 		f.write('</body></html>')
 		f.close()
@@ -1387,6 +1826,25 @@ plot """
 
 		f.close()
 
+		# Pace of Changes plot
+		f = open(path + '/pace_of_changes.plot', 'w')
+		f.write(GNUPLOT_COMMON)
+		f.write(
+"""
+set output 'pace_of_changes.png'
+unset key
+set yrange [0:]
+set xdata time
+set timefmt "%s"
+set format x "%Y-%m-%d"
+set grid y
+set ylabel "Line Changes (Additions + Deletions)"
+set xtics rotate
+set bmargin 6
+plot 'pace_of_changes.dat' using 1:2 w lines lw 2
+""")
+		f.close()
+
 		os.chdir(path)
 		files = glob.glob(path + '/*.plot')
 		for f in files:
@@ -1545,6 +2003,9 @@ class PDFReportCreator(ReportCreator):
 			('Age', f"{delta_days} days, {total_active_days} active days ({(100.0 * total_active_days / delta_days) if delta_days else 0.0:.2f}%)"),
 			('Total Files', str(data.getTotalFiles())),
 			('Total Lines of Code', f"{data.getTotalLOC()} ({data.total_lines_added} added, {data.total_lines_removed} removed)"),
+			('Source Lines of Code', f"{data.getTotalSourceLines()} ({(100.0 * data.getTotalSourceLines() / data.getTotalLOC()) if data.getTotalLOC() else 0.0:.1f}%)"),
+			('Comment Lines', f"{data.getTotalCommentLines()} ({(100.0 * data.getTotalCommentLines() / data.getTotalLOC()) if data.getTotalLOC() else 0.0:.1f}%)"),
+			('Blank Lines', f"{data.getTotalBlankLines()} ({(100.0 * data.getTotalBlankLines() / data.getTotalLOC()) if data.getTotalLOC() else 0.0:.1f}%)"),
 			('Total Commits', f"{total_commits} (average {(float(total_commits) / total_active_days) if total_active_days else 0.0:.1f} commits per active day, {(float(total_commits) / delta_days) if delta_days else 0.0:.1f} per all days)"),
 			('Authors', f"{total_authors} (average {(float(total_commits) / total_authors) if total_authors else 0.0:.1f} commits per author)")
 		]
@@ -1741,9 +2202,17 @@ class PDFReportCreator(ReportCreator):
 		]
 		
 		try:
-			avg_size = float(data.getTotalSize()) / total_files if total_files else 0.0
+			avg_size = data.getAverageFileSize()
 			stats.append(('Average file size', f"{avg_size:.2f} bytes"))
 		except (AttributeError, ZeroDivisionError):
+			# Fallback to old calculation if new method fails
+			avg_size = float(data.getTotalSize()) / total_files if total_files else 0.0
+			stats.append(('Average file size', f"{avg_size:.2f} bytes"))
+		
+		try:
+			avg_revisions = data.getAverageRevisionsPerFile()
+			stats.append(('Average revisions per file', f"{avg_revisions:.2f}"))
+		except AttributeError:
 			pass
 		
 		for label, value in stats:
@@ -1786,6 +2255,95 @@ class PDFReportCreator(ReportCreator):
 				self.pdf.cell(25, 6, str(lines), 1, 0, 'C')
 				self.pdf.cell(20, 6, f"{loc_percentage:.1f}%", 1, 0, 'C')
 				self.pdf.cell(25, 6, str(lines_per_file), 1, 1, 'C')
+		
+		self.pdf.ln(10)
+		
+		# SLOC Breakdown by Extension
+		sloc_data = data.getSLOCByExtension()
+		if sloc_data:
+			self.pdf.set_font('Arial', 'B', 14)
+			self.pdf.cell(0, 10, 'Source Lines of Code (SLOC) Breakdown', 0, 1, 'L')
+			
+			# Table header
+			self.pdf.set_font('Arial', 'B', 8)
+			self.pdf.cell(20, 8, 'Extension', 1, 0, 'C')
+			self.pdf.cell(25, 8, 'Source Lines', 1, 0, 'C')
+			self.pdf.cell(25, 8, 'Comment Lines', 1, 0, 'C')
+			self.pdf.cell(25, 8, 'Blank Lines', 1, 0, 'C')
+			self.pdf.cell(20, 8, 'Total', 1, 1, 'C')
+			
+			# Table data
+			self.pdf.set_font('Arial', '', 7)
+			sorted_sloc = sorted(sloc_data.items(), 
+								key=lambda x: x[1]['total'], reverse=True)[:15]
+			
+			for ext, sloc_info in sorted_sloc:
+				if sloc_info['total'] == 0:
+					continue
+				
+				display_ext = ext if ext else '(no ext)'
+				source_pct = (100.0 * sloc_info['source'] / sloc_info['total']) if sloc_info['total'] else 0.0
+				comment_pct = (100.0 * sloc_info['comments'] / sloc_info['total']) if sloc_info['total'] else 0.0
+				blank_pct = (100.0 * sloc_info['blank'] / sloc_info['total']) if sloc_info['total'] else 0.0
+				
+				self.pdf.cell(20, 5, display_ext[:8], 1, 0, 'L')
+				self.pdf.cell(25, 5, f"{sloc_info['source']} ({source_pct:.1f}%)", 1, 0, 'C')
+				self.pdf.cell(25, 5, f"{sloc_info['comments']} ({comment_pct:.1f}%)", 1, 0, 'C')
+				self.pdf.cell(25, 5, f"{sloc_info['blank']} ({blank_pct:.1f}%)", 1, 0, 'C')
+				self.pdf.cell(20, 5, str(sloc_info['total']), 1, 1, 'C')
+		
+		self.pdf.ln(10)
+		
+		# Add new file statistics tables
+		try:
+			# Largest Files
+			largest_files = data.getLargestFiles(10)
+			if largest_files:
+				self.pdf.set_font('Arial', 'B', 14)
+				self.pdf.cell(0, 10, 'Largest Files', 0, 1, 'L')
+				
+				# Table header
+				self.pdf.set_font('Arial', 'B', 9)
+				self.pdf.cell(80, 8, 'File', 1, 0, 'C')
+				self.pdf.cell(30, 8, 'Size (bytes)', 1, 0, 'C')
+				self.pdf.cell(30, 8, 'Size (KB)', 1, 1, 'C')
+				
+				# Table data
+				self.pdf.set_font('Arial', '', 8)
+				for filepath, size in largest_files:
+					size_kb = size / 1024.0
+					display_path = filepath[:40] + '...' if len(filepath) > 40 else filepath
+					self.pdf.cell(80, 6, display_path, 1, 0, 'L')
+					self.pdf.cell(30, 6, str(size), 1, 0, 'C')
+					self.pdf.cell(30, 6, f"{size_kb:.1f}", 1, 1, 'C')
+		except (AttributeError, TypeError):
+			pass
+		
+		try:
+			# Files with Most Revisions (Hotspots)
+			hotspot_files = data.getFilesWithMostRevisions(10)
+			if hotspot_files:
+				self.pdf.ln(10)
+				self.pdf.set_font('Arial', 'B', 14)
+				self.pdf.cell(0, 10, 'Files with Most Revisions (Hotspots)', 0, 1, 'L')
+				
+				# Table header
+				self.pdf.set_font('Arial', 'B', 9)
+				self.pdf.cell(80, 8, 'File', 1, 0, 'C')
+				self.pdf.cell(30, 8, 'Revisions', 1, 0, 'C')
+				self.pdf.cell(30, 8, '% of Commits', 1, 1, 'C')
+				
+				# Table data
+				self.pdf.set_font('Arial', '', 8)
+				total_commits = data.getTotalCommits()
+				for filepath, revisions in hotspot_files:
+					revision_pct = (100.0 * revisions / total_commits) if total_commits else 0.0
+					display_path = filepath[:40] + '...' if len(filepath) > 40 else filepath
+					self.pdf.cell(80, 6, display_path, 1, 0, 'L')
+					self.pdf.cell(30, 6, str(revisions), 1, 0, 'C')
+					self.pdf.cell(30, 6, f"{revision_pct:.2f}%", 1, 1, 'C')
+		except (AttributeError, TypeError):
+			pass
 		
 		self.pdf.ln(10)
 		
@@ -1946,16 +2504,16 @@ Usage: gitstats [options] <gitpath..> <outputpath>
 
 Options:
 -c key=value     Override configuration value
+--debug          Enable debug output
+--verbose        Enable verbose output
+-h, --help       Show this help message
 
-Available output formats (use -c output_format=<format>):
-  html           Generate HTML report only (default)
-  pdf            Generate PDF report only  
-  both           Generate both HTML and PDF reports
+Note: GitStats always generates both HTML and PDF reports.
 
 Examples:
-  gitstats repo output                    # HTML report
-  gitstats -c output_format=pdf repo output    # PDF report
-  gitstats -c output_format=both repo output   # Both formats
+  gitstats repo output                    # Generates both HTML and PDF reports
+  gitstats --verbose repo output          # With verbose output
+  gitstats --debug -c max_authors=50 repo output
 
 Default config values:
 %s
@@ -1966,7 +2524,7 @@ Please see the manual page for more details.
 
 class GitStats:
 	def run(self, args_orig):
-		optlist, args = getopt.getopt(args_orig, 'hc:', ["help"])
+		optlist, args = getopt.getopt(args_orig, 'hc:', ["help", "debug", "verbose"])
 		for o,v in optlist:
 			if o == '-c':
 				key, value = v.split('=', 1)
@@ -1974,8 +2532,15 @@ class GitStats:
 					raise KeyError('no such key "%s" in config' % key)
 				if isinstance(conf[key], int):
 					conf[key] = int(value)
+				elif isinstance(conf[key], bool):
+					conf[key] = value.lower() in ('true', '1', 'yes', 'on')
 				else:
 					conf[key] = value
+			elif o == '--debug':
+				conf['debug'] = True
+				conf['verbose'] = True  # Debug implies verbose
+			elif o == '--verbose':
+				conf['verbose'] = True
 			elif o in ('-h', '--help'):
 				usage()
 				sys.exit()
@@ -1998,6 +2563,12 @@ class GitStats:
 		if not getgnuplotversion():
 			print('gnuplot not found')
 			sys.exit(1)
+
+		if conf['verbose']:
+			print('Configuration:')
+			for key, value in conf.items():
+				print(f'  {key}: {value}')
+			print()
 
 		print('Output path: %s' % outputpath)
 		cachefile = os.path.join(outputpath, 'gitstats.cache')
@@ -2024,16 +2595,14 @@ class GitStats:
 
 		print('Generating report...')
 		
-		# Generate reports based on output_format configuration
-		if conf['output_format'] in ('html', 'both'):
-			print('Creating HTML report...')
-			html_report = HTMLReportCreator()
-			html_report.create(data, outputpath)
+		# Always generate both HTML and PDF reports
+		print('Creating HTML report...')
+		html_report = HTMLReportCreator()
+		html_report.create(data, outputpath)
 		
-		if conf['output_format'] in ('pdf', 'both'):
-			print('Creating PDF report...')
-			pdf_report = PDFReportCreator()
-			pdf_report.create(data, outputpath)
+		print('Creating PDF report...')
+		pdf_report = PDFReportCreator()
+		pdf_report.create(data, outputpath)
 
 		time_end = time.time()
 		exectime_internal = time_end - time_start
@@ -2042,11 +2611,9 @@ class GitStats:
 		if sys.stdin.isatty():
 			print('You may now run:')
 			print()
-			if conf['output_format'] in ('html', 'both'):
-				print('   sensible-browser \'%s\'' % os.path.join(outputpath, 'index.html').replace("'", "'\\''"))
-			if conf['output_format'] in ('pdf', 'both'):
-				pdf_filename = f"gitstats_{data.projectname.replace(' ', '_')}.pdf"
-				print('   PDF report: \'%s\'' % os.path.join(outputpath, pdf_filename).replace("'", "'\\''"))
+			print('   sensible-browser \'%s\'' % os.path.join(outputpath, 'index.html').replace("'", "'\\''"))
+			pdf_filename = f"gitstats_{data.projectname.replace(' ', '_')}.pdf"
+			print('   PDF report: \'%s\'' % os.path.join(outputpath, pdf_filename).replace("'", "'\\''"))
 			print()
 
 if __name__=='__main__':
