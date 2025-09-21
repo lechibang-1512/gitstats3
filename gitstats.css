@@ -169,3 +169,121 @@ h2 a {
 	text-align: left;
 	font-weight: bold;
 }
+
+/* Team Analysis specific styles */
+.rankings {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+	gap: 1em;
+	margin: 1em 0;
+}
+
+.ranking-section {
+	border: 1px solid #ccc;
+	padding: 1em;
+	background-color: #f9f9f9;
+}
+
+.ranking-section h3 {
+	margin-top: 0;
+	color: #564;
+	border-bottom: 1px solid #564;
+	padding-bottom: 0.5em;
+}
+
+.ranking-section ol {
+	margin: 0;
+	padding-left: 1.5em;
+}
+
+.ranking-section li {
+	margin: 0.5em 0;
+}
+
+/* Team performance table */
+.team-performance th {
+	background-color: #564;
+	color: white;
+	text-align: center;
+}
+
+.team-performance td {
+	text-align: center;
+}
+
+.team-performance td:first-child {
+	text-align: left;
+	font-weight: bold;
+}
+
+.team-performance td:last-child {
+	text-align: left;
+	font-size: 85%;
+}
+
+/* Working patterns table */
+.working-patterns th {
+	background-color: #446;
+	color: white;
+	text-align: center;
+	font-size: 85%;
+}
+
+.working-patterns td {
+	text-align: center;
+}
+
+.working-patterns td:first-child {
+	text-align: left;
+	font-weight: bold;
+}
+
+/* Impact analysis table */
+.impact-analysis th {
+	background-color: #644;
+	color: white;
+	text-align: center;
+}
+
+.impact-analysis td {
+	text-align: center;
+}
+
+.impact-analysis td:first-child,
+.impact-analysis td:last-child {
+	text-align: left;
+}
+
+/* Collaboration table */
+.collaboration th {
+	background-color: #464;
+	color: white;
+	text-align: center;
+}
+
+.collaboration td {
+	text-align: center;
+}
+
+.collaboration td:first-child,
+.collaboration td:last-child {
+	text-align: left;
+}
+
+/* Highlight high performers */
+tr.high-performer {
+	background-color: #e6ffe6 !important;
+}
+
+tr.high-performer:hover {
+	background-color: #ccffcc !important;
+}
+
+/* Highlight concerning patterns */
+tr.concern {
+	background-color: #ffe6e6 !important;
+}
+
+tr.concern:hover {
+	background-color: #ffcccc !important;
+}

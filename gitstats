@@ -280,6 +280,27 @@ class DataCollector:
 		self.branches = {} # branch_name -> {'commits': 0, 'lines_added': 0, 'lines_removed': 0, 'authors': {}, 'is_merged': True, 'merge_base': '', 'unique_commits': []}
 		self.unmerged_branches = [] # list of branch names that are not merged into main branch
 		self.main_branch = 'master' # will be detected automatically
+		
+		# Team collaboration analysis
+		self.author_collaboration = {} # author -> {'worked_with': {other_author: shared_files}, 'file_ownership': {file: change_count}}
+		self.commit_patterns = {} # author -> {'avg_commit_size': lines, 'small_commits': count, 'large_commits': count, 'commit_frequency': commits_per_day}
+		self.working_patterns = {} # author -> {'night_commits': count, 'weekend_commits': count, 'peak_hours': [hours], 'timezone_pattern': {tz: count}}
+		self.impact_analysis = {} # author -> {'critical_files': [files], 'impact_score': score, 'bug_potential': score}
+		self.team_performance = {} # author -> {'efficiency_score': score, 'consistency': score, 'leadership_score': score}
+		
+		# File importance tracking
+		self.critical_files = set() # Files that are likely critical (main.py, app.py, index.html, etc.)
+		self.file_impact_scores = {} # file -> impact_score based on how often it's changed and by whom
+		
+		# Time-based analysis
+		self.commits_by_time_of_day = defaultdict(lambda: defaultdict(int)) # author -> hour -> commits
+		self.commits_by_day_of_week = defaultdict(lambda: defaultdict(int)) # author -> day -> commits
+		self.author_active_periods = {} # author -> {'active_days': set, 'longest_streak': days, 'avg_gap': days}
+		
+		# Quality indicators
+		self.potential_bug_commits = [] # List of commits that might indicate bugs (reverts, fixes, etc.)
+		self.refactoring_commits = [] # List of commits that appear to be refactoring
+		self.feature_commits = [] # List of commits that appear to add features
 
 	##
 	# This should be the main function to extract data from the repository.
@@ -836,6 +857,13 @@ class GitDataCollector(DataCollector):
 		except (ValueError, IndexError):
 			print('Warning: Could not calculate repository size')
 			self.repository_size_mb = 0.0
+		
+		# Perform advanced team analysis
+		self._analyzeTeamCollaboration()
+		self._analyzeCommitPatterns()
+		self._analyzeWorkingPatterns()
+		self._analyzeImpactAndQuality()
+		self._calculateTeamPerformanceMetrics()
 	
 	def _detectMainBranch(self):
 		"""Detect the main branch (master, main, develop, etc.)"""
@@ -1013,6 +1041,455 @@ class GitDataCollector(DataCollector):
 		except Exception as e:
 			if conf['debug']:
 				print(f'Warning: Failed to analyze commit {commit_hash}: {e}')
+	
+	def _analyzeTeamCollaboration(self):
+		"""Analyze how team members collaborate on files and projects"""
+		if conf['verbose']:
+			print('Analyzing team collaboration patterns...')
+		
+		try:
+			# Get commit details with files changed
+			commit_data = getpipeoutput(['git log --name-only --pretty=format:"COMMIT:%H:%aN:%at" %s' % getlogrange('HEAD')]).split('\n')
+			
+			current_commit = None
+			current_author = None
+			current_timestamp = None
+			
+			for line in commit_data:
+				line = line.strip()
+				if line.startswith('COMMIT:'):
+					# Parse commit header: COMMIT:hash:author:timestamp
+					parts = line.split(':', 3)
+					if len(parts) >= 4:
+						current_commit = parts[1]
+						current_author = parts[2]
+						try:
+							current_timestamp = int(parts[3])
+						except ValueError:
+							current_timestamp = None
+				elif line and current_author and not line.startswith('COMMIT:'):
+					# This is a filename
+					filename = line
+					
+					# Initialize author collaboration data
+					if current_author not in self.author_collaboration:
+						self.author_collaboration[current_author] = {
+							'worked_with': defaultdict(lambda: defaultdict(int)),
+							'file_ownership': defaultdict(int)
+						}
+					
+					# Track file ownership
+					self.author_collaboration[current_author]['file_ownership'][filename] += 1
+					
+					# Track who else worked on this file
+					file_history = getpipeoutput([f'git log --pretty=format:"%aN" -- "{filename}"']).split('\n')
+					unique_authors = set(file_history) - {current_author}
+					
+					for other_author in unique_authors:
+						if other_author.strip():
+							self.author_collaboration[current_author]['worked_with'][other_author][filename] += 1
+							
+		except Exception as e:
+			if conf['debug']:
+				print(f'Warning: Team collaboration analysis failed: {e}')
+	
+	def _analyzeCommitPatterns(self):
+		"""Analyze commit patterns to identify commit behavior (small vs large commits, frequency, etc.)"""
+		if conf['verbose']:
+			print('Analyzing commit patterns...')
+		
+		try:
+			# Get detailed commit information
+			commit_lines = getpipeoutput(['git log --shortstat --pretty=format:"COMMIT:%H:%aN:%at:%s" %s' % getlogrange('HEAD')]).split('\n')
+			
+			current_author = None
+			current_timestamp = None
+			current_message = None
+			author_commits = defaultdict(list)
+			
+			for line in commit_lines:
+				line = line.strip()
+				if line.startswith('COMMIT:'):
+					# Parse: COMMIT:hash:author:timestamp:subject
+					parts = line.split(':', 4)
+					if len(parts) >= 5:
+						current_author = parts[2]
+						try:
+							current_timestamp = int(parts[3])
+							current_message = parts[4]
+						except ValueError:
+							current_timestamp = None
+							current_message = ""
+				elif line and current_author and re.search(r'files? changed', line):
+					# Parse shortstat line
+					numbers = re.findall(r'\d+', line)
+					if len(numbers) >= 1:
+						files_changed = int(numbers[0])
+						insertions = int(numbers[1]) if len(numbers) > 1 else 0
+						deletions = int(numbers[2]) if len(numbers) > 2 else 0
+						total_changes = insertions + deletions
+						
+						commit_info = {
+							'timestamp': current_timestamp,
+							'files_changed': files_changed,
+							'lines_changed': total_changes,
+							'insertions': insertions,
+							'deletions': deletions,
+							'message': current_message
+						}
+						author_commits[current_author].append(commit_info)
+			
+			# Analyze patterns for each author
+			for author, commits in author_commits.items():
+				if not commits:
+					continue
+				
+				total_commits = len(commits)
+				total_lines = sum(c['lines_changed'] for c in commits)
+				avg_commit_size = total_lines / total_commits if total_commits else 0
+				
+				# Categorize commits by size
+				small_commits = sum(1 for c in commits if c['lines_changed'] < 10)
+				medium_commits = sum(1 for c in commits if 10 <= c['lines_changed'] < 100)
+				large_commits = sum(1 for c in commits if c['lines_changed'] >= 100)
+				
+				# Calculate commit frequency (commits per day)
+				if commits:
+					timestamps = [c['timestamp'] for c in commits if c['timestamp']]
+					if len(timestamps) > 1:
+						time_span = max(timestamps) - min(timestamps)
+						days_active = time_span / (24 * 3600) if time_span > 0 else 1
+						commit_frequency = total_commits / days_active
+					else:
+						commit_frequency = total_commits
+				else:
+					commit_frequency = 0
+				
+				# Analyze commit messages for patterns
+				bug_related = sum(1 for c in commits if any(keyword in c['message'].lower() 
+					for keyword in ['fix', 'bug', 'error', 'issue', 'patch', 'repair']))
+				feature_related = sum(1 for c in commits if any(keyword in c['message'].lower() 
+					for keyword in ['add', 'new', 'feature', 'implement', 'create']))
+				refactor_related = sum(1 for c in commits if any(keyword in c['message'].lower() 
+					for keyword in ['refactor', 'cleanup', 'reorganize', 'restructure', 'optimize']))
+				
+				self.commit_patterns[author] = {
+					'total_commits': total_commits,
+					'avg_commit_size': avg_commit_size,
+					'small_commits': small_commits,
+					'medium_commits': medium_commits,
+					'large_commits': large_commits,
+					'commit_frequency': commit_frequency,
+					'bug_related_commits': bug_related,
+					'feature_related_commits': feature_related,
+					'refactor_related_commits': refactor_related,
+					'avg_files_per_commit': sum(c['files_changed'] for c in commits) / total_commits if total_commits else 0
+				}
+				
+		except Exception as e:
+			if conf['debug']:
+				print(f'Warning: Commit pattern analysis failed: {e}')
+	
+	def _analyzeWorkingPatterns(self):
+		"""Analyze when authors typically work (time of day, day of week, timezone patterns)"""
+		if conf['verbose']:
+			print('Analyzing working time patterns...')
+		
+		try:
+			# Get commit timestamps with timezone info
+			commit_lines = getpipeoutput(['git log --pretty=format:"%aN|%at|%ai|%s" %s' % getlogrange('HEAD')]).split('\n')
+			
+			for line in commit_lines:
+				if not line.strip():
+					continue
+				
+				parts = line.split('|', 3)
+				if len(parts) < 3:
+					continue
+				
+				author = parts[0]
+				try:
+					timestamp = int(parts[1])
+					date_str = parts[2]  # ISO format with timezone
+					message = parts[3] if len(parts) > 3 else ""
+				except (ValueError, IndexError):
+					continue
+				
+				# Parse date and time information
+				date = datetime.datetime.fromtimestamp(timestamp)
+				hour = date.hour
+				day_of_week = date.weekday()  # Monday = 0, Sunday = 6
+				
+				# Initialize author working patterns
+				if author not in self.working_patterns:
+					self.working_patterns[author] = {
+						'night_commits': 0,      # 22:00 - 06:00
+						'weekend_commits': 0,    # Saturday, Sunday
+						'peak_hours': defaultdict(int),
+						'peak_days': defaultdict(int),
+						'timezone_pattern': defaultdict(int),
+						'early_bird': 0,         # 05:00 - 09:00
+						'workday': 0,           # 09:00 - 17:00
+						'evening': 0,           # 17:00 - 22:00
+						'total_commits': 0
+					}
+				
+				self.working_patterns[author]['total_commits'] += 1
+				self.working_patterns[author]['peak_hours'][hour] += 1
+				self.working_patterns[author]['peak_days'][day_of_week] += 1
+				
+				# Extract timezone from date string
+				if '+' in date_str or '-' in date_str:
+					tz_part = date_str.split()[-1]
+					self.working_patterns[author]['timezone_pattern'][tz_part] += 1
+				
+				# Categorize by time of day
+				if 22 <= hour or hour < 6:
+					self.working_patterns[author]['night_commits'] += 1
+				elif 5 <= hour < 9:
+					self.working_patterns[author]['early_bird'] += 1
+				elif 9 <= hour < 17:
+					self.working_patterns[author]['workday'] += 1
+				elif 17 <= hour < 22:
+					self.working_patterns[author]['evening'] += 1
+				
+				# Weekend commits (Saturday = 5, Sunday = 6)
+				if day_of_week >= 5:
+					self.working_patterns[author]['weekend_commits'] += 1
+				
+				# Classify commit types
+				if any(keyword in message.lower() for keyword in ['fix', 'bug', 'error', 'patch']):
+					if author not in self.potential_bug_commits:
+						self.potential_bug_commits.append({'author': author, 'timestamp': timestamp, 'message': message})
+				elif any(keyword in message.lower() for keyword in ['refactor', 'cleanup', 'optimize']):
+					self.refactoring_commits.append({'author': author, 'timestamp': timestamp, 'message': message})
+				elif any(keyword in message.lower() for keyword in ['add', 'new', 'feature', 'implement']):
+					self.feature_commits.append({'author': author, 'timestamp': timestamp, 'message': message})
+			
+			# Calculate active periods for each author
+			for author in self.authors:
+				if 'active_days' in self.authors[author]:
+					active_days = self.authors[author]['active_days']
+					sorted_days = sorted(active_days)
+					
+					if len(sorted_days) > 1:
+						# Calculate gaps between active days
+						gaps = []
+						for i in range(1, len(sorted_days)):
+							prev_date = datetime.datetime.strptime(sorted_days[i-1], '%Y-%m-%d')
+							curr_date = datetime.datetime.strptime(sorted_days[i], '%Y-%m-%d')
+							gap = (curr_date - prev_date).days
+							gaps.append(gap)
+						
+						avg_gap = sum(gaps) / len(gaps) if gaps else 0
+						
+						# Find longest streak
+						longest_streak = 1
+						current_streak = 1
+						for gap in gaps:
+							if gap == 1:
+								current_streak += 1
+								longest_streak = max(longest_streak, current_streak)
+							else:
+								current_streak = 1
+					else:
+						avg_gap = 0
+						longest_streak = 1
+					
+					self.author_active_periods[author] = {
+						'active_days_count': len(active_days),
+						'longest_streak': longest_streak,
+						'avg_gap': avg_gap
+					}
+				
+		except Exception as e:
+			if conf['debug']:
+				print(f'Warning: Working pattern analysis failed: {e}')
+	
+	def _analyzeImpactAndQuality(self):
+		"""Analyze the impact of changes and identify critical files and potential quality issues"""
+		if conf['verbose']:
+			print('Analyzing impact and quality indicators...')
+		
+		try:
+			# Identify critical files based on common patterns
+			all_files = getpipeoutput(['git ls-tree -r --name-only %s' % getcommitrange('HEAD', end_only=True)]).split('\n')
+			
+			for filepath in all_files:
+				if not filepath.strip():
+					continue
+				
+				filename = os.path.basename(filepath).lower()
+				
+				# Mark files as critical based on common patterns
+				critical_patterns = [
+					'main.', 'app.', 'index.', 'config.', 'settings.',
+					'setup.', 'package.json', 'requirements.txt', 'Dockerfile',
+					'makefile', 'readme', 'license', '.env'
+				]
+				
+				if any(pattern in filename for pattern in critical_patterns):
+					self.critical_files.add(filepath)
+				
+				# Files in root directory are often critical
+				if '/' not in filepath:
+					self.critical_files.add(filepath)
+			
+			# Analyze file impact scores based on change frequency and author diversity
+			file_authors = defaultdict(set)
+			file_change_count = defaultdict(int)
+			
+			# Get file change history
+			log_lines = getpipeoutput(['git log --name-only --pretty=format:"AUTHOR:%aN" %s' % getlogrange('HEAD')]).split('\n')
+			current_author = None
+			
+			for line in log_lines:
+				line = line.strip()
+				if line.startswith('AUTHOR:'):
+					current_author = line.replace('AUTHOR:', '')
+				elif line and current_author and not line.startswith('AUTHOR:'):
+					filename = line
+					file_authors[filename].add(current_author)
+					file_change_count[filename] += 1
+			
+			# Calculate impact scores
+			for filename in file_change_count:
+				change_count = file_change_count[filename]
+				author_count = len(file_authors[filename])
+				
+				# Impact score based on change frequency and author diversity
+				base_score = min(change_count * 10, 100)  # Cap at 100
+				diversity_bonus = min(author_count * 5, 25)  # Bonus for multiple authors
+				critical_bonus = 50 if filename in self.critical_files else 0
+				
+				impact_score = base_score + diversity_bonus + critical_bonus
+				self.file_impact_scores[filename] = impact_score
+			
+			# Analyze author impact
+			for author in self.authors:
+				critical_files_touched = []
+				total_impact_score = 0
+				
+				# Check which critical files this author touched
+				for filename in self.critical_files:
+					if author in file_authors.get(filename, set()):
+						critical_files_touched.append(filename)
+						total_impact_score += self.file_impact_scores.get(filename, 0)
+				
+				# Calculate bug potential based on commit messages and patterns
+				author_commits = self.commit_patterns.get(author, {})
+				bug_commits = author_commits.get('bug_related_commits', 0)
+				total_commits = author_commits.get('total_commits', 1)
+				bug_ratio = bug_commits / total_commits if total_commits > 0 else 0
+				
+				# Higher bug potential if author has many bug-fix commits
+				bug_potential = min(bug_ratio * 100, 100)
+				
+				self.impact_analysis[author] = {
+					'critical_files': critical_files_touched,
+					'impact_score': total_impact_score,
+					'bug_potential': bug_potential,
+					'high_impact_files': [f for f in file_authors if author in file_authors[f] and self.file_impact_scores.get(f, 0) > 50]
+				}
+				
+		except Exception as e:
+			if conf['debug']:
+				print(f'Warning: Impact analysis failed: {e}')
+	
+	def _calculateTeamPerformanceMetrics(self):
+		"""Calculate comprehensive team performance metrics"""
+		if conf['verbose']:
+			print('Calculating team performance metrics...')
+		
+		try:
+			total_commits = self.getTotalCommits()
+			total_lines_changed = self.total_lines_added + self.total_lines_removed
+			
+			for author in self.authors:
+				author_info = self.authors[author]
+				commit_patterns = self.commit_patterns.get(author, {})
+				working_patterns = self.working_patterns.get(author, {})
+				impact_info = self.impact_analysis.get(author, {})
+				
+				# Efficiency Score (based on lines changed per commit and commit quality)
+				avg_commit_size = commit_patterns.get('avg_commit_size', 0)
+				total_author_commits = author_info.get('commits', 0)
+				
+				# Normalize efficiency (sweet spot is around 20-50 lines per commit)
+				if 20 <= avg_commit_size <= 50:
+					size_efficiency = 100
+				elif avg_commit_size < 20:
+					size_efficiency = max(0, avg_commit_size * 5)  # Penalty for too small commits
+				else:
+					size_efficiency = max(0, 100 - (avg_commit_size - 50) * 2)  # Penalty for too large commits
+				
+				# Quality indicators
+				bug_commits = commit_patterns.get('bug_related_commits', 0)
+				feature_commits = commit_patterns.get('feature_related_commits', 0)
+				refactor_commits = commit_patterns.get('refactor_related_commits', 0)
+				
+				quality_score = 0
+				if total_author_commits > 0:
+					feature_ratio = feature_commits / total_author_commits
+					refactor_ratio = refactor_commits / total_author_commits
+					bug_ratio = bug_commits / total_author_commits
+					
+					quality_score = (feature_ratio * 40 + refactor_ratio * 30 - bug_ratio * 20) * 100
+					quality_score = max(0, min(100, quality_score))
+				
+				efficiency_score = (size_efficiency * 0.6 + quality_score * 0.4)
+				
+				# Consistency Score (based on commit frequency and working patterns)
+				commit_frequency = commit_patterns.get('commit_frequency', 0)
+				active_periods = self.author_active_periods.get(author, {})
+				longest_streak = active_periods.get('longest_streak', 1)
+				avg_gap = active_periods.get('avg_gap', 30)
+				
+				# Consistency based on regular commits and sustained activity
+				frequency_score = min(commit_frequency * 20, 100)  # Up to 5 commits per day = max score
+				streak_score = min(longest_streak * 5, 100)  # Longer streaks = better consistency
+				gap_score = max(0, 100 - avg_gap * 3)  # Smaller gaps = better consistency
+				
+				consistency_score = (frequency_score * 0.4 + streak_score * 0.3 + gap_score * 0.3)
+				
+				# Leadership Score (based on impact on critical files, collaboration, and mentoring indicators)
+				impact_score = impact_info.get('impact_score', 0)
+				critical_files_count = len(impact_info.get('critical_files', []))
+				
+				# Collaboration score based on working with others
+				collaboration_data = self.author_collaboration.get(author, {})
+				worked_with_count = len(collaboration_data.get('worked_with', {}))
+				
+				# Normalize impact and collaboration
+				impact_leadership = min(impact_score / 10, 100)  # Scale impact score
+				collaboration_leadership = min(worked_with_count * 10, 100)  # Max score at 10 collaborators
+				critical_file_leadership = min(critical_files_count * 20, 100)  # Max score at 5 critical files
+				
+				leadership_score = (impact_leadership * 0.4 + collaboration_leadership * 0.3 + critical_file_leadership * 0.3)
+				
+				# Overall contribution percentage
+				author_commits = author_info.get('commits', 0)
+				contribution_percentage = (author_commits / total_commits * 100) if total_commits > 0 else 0
+				
+				# Store performance metrics
+				self.team_performance[author] = {
+					'efficiency_score': efficiency_score,
+					'consistency': consistency_score,
+					'leadership_score': leadership_score,
+					'contribution_percentage': contribution_percentage,
+					'overall_score': (efficiency_score * 0.4 + consistency_score * 0.3 + leadership_score * 0.3),
+					'commit_quality_analysis': {
+						'avg_commit_size': avg_commit_size,
+						'small_commits_ratio': commit_patterns.get('small_commits', 0) / total_author_commits if total_author_commits > 0 else 0,
+						'large_commits_ratio': commit_patterns.get('large_commits', 0) / total_author_commits if total_author_commits > 0 else 0,
+						'bug_fix_ratio': bug_commits / total_author_commits if total_author_commits > 0 else 0,
+						'feature_ratio': feature_commits / total_author_commits if total_author_commits > 0 else 0
+					}
+				}
+				
+		except Exception as e:
+			if conf['debug']:
+				print(f'Warning: Team performance calculation failed: {e}')
 	
 	def refine(self):
 		# authors
@@ -1211,6 +1688,154 @@ class GitDataCollector(DataCollector):
 				unmerged_stats[branch_name] = self.branches[branch_name]
 		return unmerged_stats
 	
+	# New methods for advanced team analysis
+	def getCommitPatterns(self):
+		"""Get commit patterns analysis for all authors."""
+		return self.commit_patterns
+	
+	def getCommitPatternsForAuthor(self, author):
+		"""Get commit patterns for a specific author."""
+		return self.commit_patterns.get(author, {})
+	
+	def getWorkingPatterns(self):
+		"""Get working time patterns for all authors."""
+		return self.working_patterns
+	
+	def getWorkingPatternsForAuthor(self, author):
+		"""Get working patterns for a specific author."""
+		return self.working_patterns.get(author, {})
+	
+	def getTeamCollaboration(self):
+		"""Get team collaboration analysis."""
+		return self.author_collaboration
+	
+	def getCollaborationForAuthor(self, author):
+		"""Get collaboration data for a specific author."""
+		return self.author_collaboration.get(author, {})
+	
+	def getImpactAnalysis(self):
+		"""Get impact analysis for all authors."""
+		return self.impact_analysis
+	
+	def getImpactAnalysisForAuthor(self, author):
+		"""Get impact analysis for a specific author."""
+		return self.impact_analysis.get(author, {})
+	
+	def getTeamPerformance(self):
+		"""Get team performance metrics for all authors."""
+		return self.team_performance
+	
+	def getTeamPerformanceForAuthor(self, author):
+		"""Get team performance metrics for a specific author."""
+		return self.team_performance.get(author, {})
+	
+	def getCriticalFiles(self):
+		"""Get list of files identified as critical to the project."""
+		return list(self.critical_files)
+	
+	def getFileImpactScores(self):
+		"""Get impact scores for all files."""
+		return dict(self.file_impact_scores)
+	
+	def getTopImpactFiles(self, limit=10):
+		"""Get files with highest impact scores."""
+		sorted_files = sorted(self.file_impact_scores.items(), key=lambda x: x[1], reverse=True)
+		return sorted_files[:limit]
+	
+	def getBugRelatedCommits(self):
+		"""Get commits that appear to be bug-related."""
+		return self.potential_bug_commits
+	
+	def getRefactoringCommits(self):
+		"""Get commits that appear to be refactoring."""
+		return self.refactoring_commits
+	
+	def getFeatureCommits(self):
+		"""Get commits that appear to add features."""
+		return self.feature_commits
+	
+	def getAuthorActivePeriods(self):
+		"""Get active periods analysis for all authors."""
+		return self.author_active_periods
+	
+	def getAuthorsByContribution(self):
+		"""Get authors sorted by contribution percentage."""
+		performance_data = [(author, perf.get('contribution_percentage', 0)) 
+						   for author, perf in self.team_performance.items()]
+		return sorted(performance_data, key=lambda x: x[1], reverse=True)
+	
+	def getAuthorsByEfficiency(self):
+		"""Get authors sorted by efficiency score."""
+		performance_data = [(author, perf.get('efficiency_score', 0)) 
+						   for author, perf in self.team_performance.items()]
+		return sorted(performance_data, key=lambda x: x[1], reverse=True)
+	
+	def getAuthorsByConsistency(self):
+		"""Get authors sorted by consistency score."""
+		performance_data = [(author, perf.get('consistency', 0)) 
+						   for author, perf in self.team_performance.items()]
+		return sorted(performance_data, key=lambda x: x[1], reverse=True)
+	
+	def getAuthorsByLeadership(self):
+		"""Get authors sorted by leadership score."""
+		performance_data = [(author, perf.get('leadership_score', 0)) 
+						   for author, perf in self.team_performance.items()]
+		return sorted(performance_data, key=lambda x: x[1], reverse=True)
+	
+	def getTeamWorkDistribution(self):
+		"""Analyze work distribution across team members."""
+		total_commits = self.getTotalCommits()
+		total_lines = self.total_lines_added + self.total_lines_removed
+		
+		distribution = {}
+		for author in self.authors:
+			author_info = self.authors[author]
+			author_commits = author_info.get('commits', 0)
+			author_lines = author_info.get('lines_added', 0) + author_info.get('lines_removed', 0)
+			
+			distribution[author] = {
+				'commit_percentage': (author_commits / total_commits * 100) if total_commits > 0 else 0,
+				'lines_percentage': (author_lines / total_lines * 100) if total_lines > 0 else 0,
+				'commits': author_commits,
+				'lines_changed': author_lines
+			}
+		
+		return distribution
+	
+	def getCommitSizeAnalysis(self):
+		"""Get analysis of commit sizes across the team."""
+		analysis = {
+			'small_commits_authors': [],  # Authors with >50% small commits
+			'large_commits_authors': [],  # Authors with >20% large commits
+			'balanced_authors': [],       # Authors with balanced commit sizes
+			'overall_stats': {
+				'total_small': 0,
+				'total_medium': 0,
+				'total_large': 0
+			}
+		}
+		
+		for author, patterns in self.commit_patterns.items():
+			total_commits = patterns.get('total_commits', 0)
+			if total_commits == 0:
+				continue
+			
+			small_ratio = patterns.get('small_commits', 0) / total_commits
+			large_ratio = patterns.get('large_commits', 0) / total_commits
+			
+			analysis['overall_stats']['total_small'] += patterns.get('small_commits', 0)
+			analysis['overall_stats']['total_medium'] += patterns.get('medium_commits', 0)
+			analysis['overall_stats']['total_large'] += patterns.get('large_commits', 0)
+			
+			if small_ratio > 0.5:
+				analysis['small_commits_authors'].append((author, small_ratio))
+			elif large_ratio > 0.2:
+				analysis['large_commits_authors'].append((author, large_ratio))
+			else:
+				analysis['balanced_authors'].append((author, small_ratio, large_ratio))
+		
+		return analysis
+	
 	def revToDate(self, rev):
 		stamp = int(getpipeoutput(['git log --pretty=format:%%at "%s" -n 1' % rev]))
 		return datetime.datetime.fromtimestamp(stamp).strftime('%Y-%m-%d')
@@ -1316,6 +1941,316 @@ class HTMLReportCreator(ReportCreator):
 		f.write('</dl>')
 
 		f.write('</body>\n</html>')
+		f.close()
+
+		###
+		# Team Analysis - New comprehensive team analysis page
+		f = open(path + '/team_analysis.html', 'w')
+		self.printHeader(f)
+		f.write('<h1>Team Analysis</h1>')
+		self.printNav(f)
+
+		# Team Overview
+		f.write(html_header(2, 'Team Overview'))
+		total_authors = data.getTotalAuthors()
+		work_distribution = data.getTeamWorkDistribution()
+		
+		f.write('<dl>')
+		f.write('<dt>Total Team Members</dt><dd>%d</dd>' % total_authors)
+		
+		# Calculate work distribution metrics
+		commit_contributions = [dist['commit_percentage'] for dist in work_distribution.values()]
+		lines_contributions = [dist['lines_percentage'] for dist in work_distribution.values()]
+		
+		if commit_contributions:
+			max_commit_contrib = max(commit_contributions)
+			min_commit_contrib = min(commit_contributions)
+			avg_commit_contrib = sum(commit_contributions) / len(commit_contributions)
+			
+			f.write('<dt>Work Distribution (Commits)</dt><dd>Max: %.1f%%, Min: %.1f%%, Avg: %.1f%%</dd>' % 
+				(max_commit_contrib, min_commit_contrib, avg_commit_contrib))
+		
+		if lines_contributions:
+			max_lines_contrib = max(lines_contributions)
+			min_lines_contrib = min(lines_contributions)
+			avg_lines_contrib = sum(lines_contributions) / len(lines_contributions)
+			
+			f.write('<dt>Work Distribution (Lines)</dt><dd>Max: %.1f%%, Min: %.1f%%, Avg: %.1f%%</dd>' % 
+				(max_lines_contrib, min_lines_contrib, avg_lines_contrib))
+		
+		f.write('</dl>')
+
+		# Team Performance Rankings
+		f.write(html_header(2, 'Team Performance Rankings'))
+		
+		# Top contributors by different metrics
+		contrib_ranking = data.getAuthorsByContribution()
+		efficiency_ranking = data.getAuthorsByEfficiency()
+		consistency_ranking = data.getAuthorsByConsistency()
+		leadership_ranking = data.getAuthorsByLeadership()
+		
+		f.write('<div class="rankings">')
+		f.write('<div class="ranking-section">')
+		f.write('<h3>Top Contributors (by Commit %)</h3>')
+		f.write('<ol>')
+		for author, percentage in contrib_ranking[:10]:
+			f.write('<li>%s (%.1f%%)</li>' % (author, percentage))
+		f.write('</ol>')
+		f.write('</div>')
+		
+		f.write('<div class="ranking-section">')
+		f.write('<h3>Most Efficient (by Quality Score)</h3>')
+		f.write('<ol>')
+		for author, score in efficiency_ranking[:10]:
+			f.write('<li>%s (%.1f)</li>' % (author, score))
+		f.write('</ol>')
+		f.write('</div>')
+		
+		f.write('<div class="ranking-section">')
+		f.write('<h3>Most Consistent</h3>')
+		f.write('<ol>')
+		for author, score in consistency_ranking[:10]:
+			f.write('<li>%s (%.1f)</li>' % (author, score))
+		f.write('</ol>')
+		f.write('</div>')
+		
+		f.write('<div class="ranking-section">')
+		f.write('<h3>Leadership Score</h3>')
+		f.write('<ol>')
+		for author, score in leadership_ranking[:10]:
+			f.write('<li>%s (%.1f)</li>' % (author, score))
+		f.write('</ol>')
+		f.write('</div>')
+		f.write('</div>')
+
+		# Detailed Team Performance Table
+		f.write(html_header(2, 'Detailed Team Performance Analysis'))
+		f.write('<table class="team-performance sortable" id="team-performance">')
+		f.write('<tr>')
+		f.write('<th>Author</th>')
+		f.write('<th>Commits</th>')
+		f.write('<th>Contrib %</th>')
+		f.write('<th>Lines Changed</th>')
+		f.write('<th>Avg Commit Size</th>')
+		f.write('<th>Efficiency</th>')
+		f.write('<th>Consistency</th>')
+		f.write('<th>Leadership</th>')
+		f.write('<th>Overall Score</th>')
+		f.write('<th>Assessment</th>')
+		f.write('</tr>')
+		
+		team_performance = data.getTeamPerformance()
+		commit_patterns = data.getCommitPatterns()
+		
+		# Sort by overall score
+		sorted_authors = sorted(team_performance.items(), key=lambda x: x[1].get('overall_score', 0), reverse=True)
+		
+		for author, perf in sorted_authors:
+			author_info = data.getAuthorInfo(author)
+			patterns = commit_patterns.get(author, {})
+			
+			commits = author_info.get('commits', 0)
+			lines_changed = author_info.get('lines_added', 0) + author_info.get('lines_removed', 0)
+			contrib_pct = perf.get('contribution_percentage', 0)
+			avg_commit_size = patterns.get('avg_commit_size', 0)
+			efficiency = perf.get('efficiency_score', 0)
+			consistency = perf.get('consistency', 0)
+			leadership = perf.get('leadership_score', 0)
+			overall = perf.get('overall_score', 0)
+			
+			# Generate assessment
+			assessment = self._generateAssessment(perf, patterns)
+			
+			f.write('<tr>')
+			f.write('<td>%s</td>' % author)
+			f.write('<td>%d</td>' % commits)
+			f.write('<td>%.1f%%</td>' % contrib_pct)
+			f.write('<td>%d</td>' % lines_changed)
+			f.write('<td>%.1f</td>' % avg_commit_size)
+			f.write('<td>%.1f</td>' % efficiency)
+			f.write('<td>%.1f</td>' % consistency)
+			f.write('<td>%.1f</td>' % leadership)
+			f.write('<td>%.1f</td>' % overall)
+			f.write('<td>%s</td>' % assessment)
+			f.write('</tr>')
+		
+		f.write('</table>')
+
+		# Commit Patterns Analysis
+		f.write(html_header(2, 'Commit Patterns Analysis'))
+		
+		commit_size_analysis = data.getCommitSizeAnalysis()
+		
+		f.write('<h3>Commit Size Distribution</h3>')
+		f.write('<p><strong>Small commits (&lt;10 lines):</strong> %d commits</p>' % commit_size_analysis['overall_stats']['total_small'])
+		f.write('<p><strong>Medium commits (10-100 lines):</strong> %d commits</p>' % commit_size_analysis['overall_stats']['total_medium'])
+		f.write('<p><strong>Large commits (&gt;100 lines):</strong> %d commits</p>' % commit_size_analysis['overall_stats']['total_large'])
+		
+		if commit_size_analysis['small_commits_authors']:
+			f.write('<h4>Authors with predominantly small commits (possible commit splitting):</h4>')
+			f.write('<ul>')
+			for author, ratio in commit_size_analysis['small_commits_authors']:
+				f.write('<li>%s (%.1f%% small commits)</li>' % (author, ratio * 100))
+			f.write('</ul>')
+		
+		if commit_size_analysis['large_commits_authors']:
+			f.write('<h4>Authors with frequent large commits:</h4>')
+			f.write('<ul>')
+			for author, ratio in commit_size_analysis['large_commits_authors']:
+				f.write('<li>%s (%.1f%% large commits)</li>' % (author, ratio * 100))
+			f.write('</ul>')
+
+		# Working Patterns Analysis
+		f.write(html_header(2, 'Working Time Patterns'))
+		
+		working_patterns = data.getWorkingPatterns()
+		
+		f.write('<table class="working-patterns sortable" id="working-patterns">')
+		f.write('<tr>')
+		f.write('<th>Author</th>')
+		f.write('<th>Night Worker<br>(22:00-06:00)</th>')
+		f.write('<th>Weekend Worker</th>')
+		f.write('<th>Early Bird<br>(05:00-09:00)</th>')
+		f.write('<th>Regular Hours<br>(09:00-17:00)</th>')
+		f.write('<th>Evening<br>(17:00-22:00)</th>')
+		f.write('<th>Peak Hour</th>')
+		f.write('<th>Peak Day</th>')
+		f.write('</tr>')
+		
+		for author, patterns in working_patterns.items():
+			total_commits = patterns.get('total_commits', 1)
+			
+			night_pct = (patterns.get('night_commits', 0) / total_commits) * 100
+			weekend_pct = (patterns.get('weekend_commits', 0) / total_commits) * 100
+			early_pct = (patterns.get('early_bird', 0) / total_commits) * 100
+			workday_pct = (patterns.get('workday', 0) / total_commits) * 100
+			evening_pct = (patterns.get('evening', 0) / total_commits) * 100
+			
+			# Find peak hour and day
+			peak_hours = patterns.get('peak_hours', {})
+			peak_days = patterns.get('peak_days', {})
+			
+			peak_hour = max(peak_hours.keys(), key=lambda k: peak_hours[k]) if peak_hours else 'N/A'
+			peak_day = max(peak_days.keys(), key=lambda k: peak_days[k]) if peak_days else 'N/A'
+			peak_day_name = WEEKDAYS[peak_day] if isinstance(peak_day, int) and 0 <= peak_day < 7 else peak_day
+			
+			f.write('<tr>')
+			f.write('<td>%s</td>' % author)
+			f.write('<td>%.1f%%</td>' % night_pct)
+			f.write('<td>%.1f%%</td>' % weekend_pct)
+			f.write('<td>%.1f%%</td>' % early_pct)
+			f.write('<td>%.1f%%</td>' % workday_pct)
+			f.write('<td>%.1f%%</td>' % evening_pct)
+			f.write('<td>%s:00</td>' % peak_hour)
+			f.write('<td>%s</td>' % peak_day_name)
+			f.write('</tr>')
+		
+		f.write('</table>')
+
+		# Impact Analysis
+		f.write(html_header(2, 'Impact and Quality Analysis'))
+		
+		impact_analysis = data.getImpactAnalysis()
+		critical_files = data.getCriticalFiles()
+		
+		f.write('<h3>Critical Files in Project (%d files identified)</h3>' % len(critical_files))
+		if critical_files:
+			f.write('<ul>')
+			for critical_file in critical_files[:20]:  # Show first 20
+				f.write('<li>%s</li>' % critical_file)
+			f.write('</ul>')
+			if len(critical_files) > 20:
+				f.write('<p>... and %d more files</p>' % (len(critical_files) - 20))
+		
+		f.write('<h3>Author Impact Analysis</h3>')
+		f.write('<table class="impact-analysis sortable" id="impact-analysis">')
+		f.write('<tr>')
+		f.write('<th>Author</th>')
+		f.write('<th>Impact Score</th>')
+		f.write('<th>Critical Files Touched</th>')
+		f.write('<th>Bug Potential</th>')
+		f.write('<th>High Impact Files</th>')
+		f.write('<th>Assessment</th>')
+		f.write('</tr>')
+		
+		# Sort by impact score
+		sorted_impact = sorted(impact_analysis.items(), key=lambda x: x[1].get('impact_score', 0), reverse=True)
+		
+		for author, impact in sorted_impact:
+			impact_score = impact.get('impact_score', 0)
+			critical_files_touched = len(impact.get('critical_files', []))
+			bug_potential = impact.get('bug_potential', 0)
+			high_impact_files = len(impact.get('high_impact_files', []))
+			
+			# Generate impact assessment
+			if impact_score > 200:
+				impact_assessment = "Very High Impact"
+			elif impact_score > 100:
+				impact_assessment = "High Impact"
+			elif impact_score > 50:
+				impact_assessment = "Medium Impact"
+			else:
+				impact_assessment = "Low Impact"
+			
+			if bug_potential > 30:
+				impact_assessment += " (High Bug Risk)"
+			elif bug_potential > 15:
+				impact_assessment += " (Medium Bug Risk)"
+			
+			f.write('<tr>')
+			f.write('<td>%s</td>' % author)
+			f.write('<td>%.1f</td>' % impact_score)
+			f.write('<td>%d</td>' % critical_files_touched)
+			f.write('<td>%.1f%%</td>' % bug_potential)
+			f.write('<td>%d</td>' % high_impact_files)
+			f.write('<td>%s</td>' % impact_assessment)
+			f.write('</tr>')
+		
+		f.write('</table>')
+
+		# Team Collaboration Analysis
+		f.write(html_header(2, 'Team Collaboration Analysis'))
+		
+		collaboration_data = data.getTeamCollaboration()
+		
+		f.write('<table class="collaboration sortable" id="collaboration">')
+		f.write('<tr>')
+		f.write('<th>Author</th>')
+		f.write('<th>Files Owned</th>')
+		f.write('<th>Collaborators</th>')
+		f.write('<th>Shared Files</th>')
+		f.write('<th>Top Collaborations</th>')
+		f.write('</tr>')
+		
+		for author, collab in collaboration_data.items():
+			files_owned = len(collab.get('file_ownership', {}))
+			worked_with = collab.get('worked_with', {})
+			collaborators_count = len(worked_with)
+			
+			# Count total shared files
+			shared_files = 0
+			top_collabs = []
+			
+			for other_author, shared_files_dict in worked_with.items():
+				shared_count = len(shared_files_dict)
+				shared_files += shared_count
+				top_collabs.append((other_author, shared_count))
+			
+			# Sort and take top 3 collaborations
+			top_collabs.sort(key=lambda x: x[1], reverse=True)
+			top_collabs_str = ', '.join([f"{author}({count})" for author, count in top_collabs[:3]])
+			
+			f.write('<tr>')
+			f.write('<td>%s</td>' % author)
+			f.write('<td>%d</td>' % files_owned)
+			f.write('<td>%d</td>' % collaborators_count)
+			f.write('<td>%d</td>' % shared_files)
+			f.write('<td>%s</td>' % top_collabs_str)
+			f.write('</tr>')
+		
+		f.write('</table>')
+
+		f.write('</body></html>')
 		f.close()
 
 		###
@@ -1979,6 +2914,56 @@ class HTMLReportCreator(ReportCreator):
 
 		self.createGraphs(path)
 	
+	def _generateAssessment(self, performance, patterns):
+		"""Generate a text assessment for an author based on their performance metrics."""
+		efficiency = performance.get('efficiency_score', 0)
+		consistency = performance.get('consistency', 0)
+		leadership = performance.get('leadership_score', 0)
+		contribution = performance.get('contribution_percentage', 0)
+		
+		small_commits_ratio = patterns.get('small_commits', 0) / max(patterns.get('total_commits', 1), 1)
+		large_commits_ratio = patterns.get('large_commits', 0) / max(patterns.get('total_commits', 1), 1)
+		
+		assessments = []
+		
+		# Contribution level
+		if contribution > 25:
+			assessments.append("Major Contributor")
+		elif contribution > 10:
+			assessments.append("Regular Contributor")
+		elif contribution > 2:
+			assessments.append("Minor Contributor")
+		else:
+			assessments.append("Occasional Contributor")
+		
+		# Quality assessment
+		if efficiency > 80:
+			assessments.append("High Quality")
+		elif efficiency > 60:
+			assessments.append("Good Quality")
+		elif efficiency > 40:
+			assessments.append("Average Quality")
+		else:
+			assessments.append("Needs Improvement")
+		
+		# Work pattern assessment
+		if small_commits_ratio > 0.7:
+			assessments.append("Frequent Small Commits")
+		elif large_commits_ratio > 0.3:
+			assessments.append("Prefers Large Commits")
+		
+		if consistency > 80:
+			assessments.append("Very Consistent")
+		elif consistency > 60:
+			assessments.append("Consistent")
+		
+		if leadership > 70:
+			assessments.append("Leadership Role")
+		elif leadership > 50:
+			assessments.append("Collaborative")
+		
+		return ", ".join(assessments) if assessments else "Standard Contributor"
+	
 	def createGraphs(self, path):
 		print('Generating graphs...')
 
@@ -2224,6 +3209,7 @@ plot 'pace_of_changes.dat' using 1:2 w lines lw 2
 <li><a href="index.html">General</a></li>
 <li><a href="activity.html">Activity</a></li>
 <li><a href="authors.html">Authors</a></li>
+<li><a href="team_analysis.html">Team Analysis</a></li>
 <li><a href="branches.html">Branches</a></li>
 <li><a href="files.html">Files</a></li>
 <li><a href="lines.html">Lines</a></li>
@@ -2254,6 +3240,7 @@ class PDFReportCreator(ReportCreator):
 		self._create_general_page(data)
 		self._create_activity_page(data)
 		self._create_authors_page(data)
+		self._create_team_analysis_page(data)
 		self._create_files_page(data)
 		self._create_lines_page(data)
 		self._create_tags_page(data)
@@ -2326,10 +3313,11 @@ class PDFReportCreator(ReportCreator):
 			'1. General Statistics',
 			'2. Activity Statistics', 
 			'3. Authors Statistics',
-			'4. Files Statistics',
-			'5. Lines of Code Statistics',
-			'6. Tags Statistics',
-			'7. Branches Statistics'
+			'4. Team Analysis',
+			'5. Files Statistics',
+			'6. Lines of Code Statistics',
+			'7. Tags Statistics',
+			'8. Branches Statistics'
 		]
 		
 		for section in sections:
@@ -2542,11 +3530,148 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.cell(0, 10, 'Commits by Domains', 0, 1, 'L')
 		self._add_chart_if_exists('domains.png', 180, 100)
 	
+	def _create_team_analysis_page(self, data):
+		"""Create the team analysis page for comprehensive team evaluation (new feature)."""
+		self.pdf.add_page()
+		self.pdf.set_font('Arial', 'B', 20)
+		self.pdf.cell(0, 15, '4. Team Analysis', 0, 1, 'L')
+		
+		# Team Overview
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Team Overview', 0, 1, 'L')
+		
+		self.pdf.set_font('Arial', '', 12)
+		total_authors = data.getTotalAuthors()
+		work_distribution = data.getTeamWorkDistribution()
+		
+		self.pdf.cell(50, 8, 'Total Team Members:', 0, 0, 'L')
+		self.pdf.cell(0, 8, str(total_authors), 0, 1, 'L')
+		
+		# Calculate work distribution metrics
+		commit_contributions = [dist['commit_percentage'] for dist in work_distribution.values()]
+		if commit_contributions:
+			max_contrib = max(commit_contributions)
+			min_contrib = min(commit_contributions)
+			avg_contrib = sum(commit_contributions) / len(commit_contributions)
+			
+			self.pdf.cell(50, 8, 'Work Distribution:', 0, 0, 'L')
+			self.pdf.cell(0, 8, f'Max: {max_contrib:.1f}%, Min: {min_contrib:.1f}%, Avg: {avg_contrib:.1f}%', 0, 1, 'L')
+		
+		self.pdf.ln(10)
+		
+		# Team Performance Rankings
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Team Performance Rankings', 0, 1, 'L')
+		
+		# Top Contributors
+		contrib_ranking = data.getAuthorsByContribution()
+		efficiency_ranking = data.getAuthorsByEfficiency()
+		
+		self.pdf.set_font('Arial', 'B', 12)
+		self.pdf.cell(0, 8, 'Top 10 Contributors (by commit percentage):', 0, 1, 'L')
+		self.pdf.set_font('Arial', '', 10)
+		
+		for i, (author, percentage) in enumerate(contrib_ranking[:10], 1):
+			display_author = author[:30] + "..." if len(author) > 33 else author
+			self.pdf.cell(0, 6, f'{i}. {display_author} ({percentage:.1f}%)', 0, 1, 'L')
+		
+		self.pdf.ln(5)
+		
+		# Team Performance Table
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Detailed Performance Analysis', 0, 1, 'L')
+		
+		team_performance = data.getTeamPerformance()
+		commit_patterns = data.getCommitPatterns()
+		
+		# Table header
+		self.pdf.set_font('Arial', 'B', 8)
+		self.pdf.cell(35, 6, 'Author', 1, 0, 'C')
+		self.pdf.cell(20, 6, 'Commits', 1, 0, 'C')
+		self.pdf.cell(20, 6, 'Contrib %', 1, 0, 'C')
+		self.pdf.cell(25, 6, 'Efficiency', 1, 0, 'C')
+		self.pdf.cell(25, 6, 'Consistency', 1, 0, 'C')
+		self.pdf.cell(25, 6, 'Leadership', 1, 0, 'C')
+		self.pdf.cell(25, 6, 'Overall', 1, 1, 'C')
+		
+		# Table data - show top 15 performers
+		self.pdf.set_font('Arial', '', 7)
+		sorted_authors = sorted(team_performance.items(), key=lambda x: x[1].get('overall_score', 0), reverse=True)
+		
+		for author, perf in sorted_authors[:15]:
+			author_info = data.getAuthorInfo(author)
+			
+			commits = author_info.get('commits', 0)
+			contrib_pct = perf.get('contribution_percentage', 0)
+			efficiency = perf.get('efficiency_score', 0)
+			consistency = perf.get('consistency', 0)
+			leadership = perf.get('leadership_score', 0)
+			overall = perf.get('overall_score', 0)
+			
+			# Truncate long author names
+			display_author = author[:18] + "..." if len(author) > 21 else author
+			
+			self.pdf.cell(35, 5, display_author, 1, 0, 'L')
+			self.pdf.cell(20, 5, str(commits), 1, 0, 'C')
+			self.pdf.cell(20, 5, f'{contrib_pct:.1f}%', 1, 0, 'C')
+			self.pdf.cell(25, 5, f'{efficiency:.1f}', 1, 0, 'C')
+			self.pdf.cell(25, 5, f'{consistency:.1f}', 1, 0, 'C')
+			self.pdf.cell(25, 5, f'{leadership:.1f}', 1, 0, 'C')
+			self.pdf.cell(25, 5, f'{overall:.1f}', 1, 1, 'C')
+		
+		self.pdf.ln(10)
+		
+		# Team Assessment Conclusion
+		self.pdf.set_font('Arial', 'B', 14)
+		self.pdf.cell(0, 10, 'Team Assessment Conclusion', 0, 1, 'L')
+		
+		self.pdf.set_font('Arial', '', 10)
+		
+		# Generate team insights
+		top_contributor = contrib_ranking[0] if contrib_ranking else ("N/A", 0)
+		most_efficient = efficiency_ranking[0] if efficiency_ranking else ("N/A", 0)
+		
+		self.pdf.cell(0, 6, f'- Top contributor: {top_contributor[0]} ({top_contributor[1]:.1f}% of commits)', 0, 1, 'L')
+		self.pdf.cell(0, 6, f'- Most efficient developer: {most_efficient[0]} (score: {most_efficient[1]:.1f})', 0, 1, 'L')
+		self.pdf.cell(0, 6, f'- Team size: {total_authors} active contributors', 0, 1, 'L')
+		
+		# Work distribution assessment
+		if commit_contributions:
+			gini_coefficient = self._calculate_gini_coefficient(commit_contributions)
+			if gini_coefficient < 0.3:
+				distribution_assessment = "Well-distributed (very balanced team)"
+			elif gini_coefficient < 0.5:
+				distribution_assessment = "Moderately distributed (some imbalance)"
+			else:
+				distribution_assessment = "Highly concentrated (few dominant contributors)"
+			
+			self.pdf.cell(0, 6, f'- Work distribution: {distribution_assessment}', 0, 1, 'L')
+	
+	def _calculate_gini_coefficient(self, values):
+		"""Calculate Gini coefficient for work distribution analysis."""
+		if not values:
+			return 0
+		
+		sorted_values = sorted(values)
+		n = len(sorted_values)
+		cumsum = sum(sorted_values)
+		
+		if cumsum == 0:
+			return 0
+		
+		sum_of_differences = 0
+		for i in range(n):
+			for j in range(n):
+				sum_of_differences += abs(sorted_values[i] - sorted_values[j])
+		
+		gini = sum_of_differences / (2 * n * cumsum)
+		return gini
+	
 	def _create_files_page(self, data):
 		"""Create the files statistics page with charts (mirrors files.html)."""
 		self.pdf.add_page()
 		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '4. Files Statistics', 0, 1, 'L')
+		self.pdf.cell(0, 15, '5. Files Statistics', 0, 1, 'L')
 		
 		# Basic file stats
 		total_files = data.getTotalFiles()
@@ -2713,7 +3838,7 @@ class PDFReportCreator(ReportCreator):
 		"""Create the lines of code statistics page with charts (mirrors lines.html)."""
 		self.pdf.add_page()
 		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '5. Lines of Code Statistics', 0, 1, 'L')
+		self.pdf.cell(0, 15, '6. Lines of Code Statistics', 0, 1, 'L')
 		
 		# Basic line stats
 		self.pdf.set_font('Arial', '', 12)
@@ -2770,7 +3895,7 @@ class PDFReportCreator(ReportCreator):
 		"""Create the tags statistics page (mirrors tags.html)."""
 		self.pdf.add_page()
 		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '6. Tags Statistics', 0, 1, 'L')
+		self.pdf.cell(0, 15, '7. Tags Statistics', 0, 1, 'L')
 		
 		self.pdf.set_font('Arial', '', 12)
 		
@@ -2858,7 +3983,7 @@ class PDFReportCreator(ReportCreator):
 		"""Create the branches statistics page (mirrors branches.html)."""
 		self.pdf.add_page()
 		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '7. Branches Statistics', 0, 1, 'L')
+		self.pdf.cell(0, 15, '8. Branches Statistics', 0, 1, 'L')
 		
 		self.pdf.set_font('Arial', '', 12)
 		
