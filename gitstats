@@ -275,6 +275,11 @@ class DataCollector:
 		
 		# Repository size tracking
 		self.repository_size_mb = 0.0
+		
+		# Branch analysis
+		self.branches = {} # branch_name -> {'commits': 0, 'lines_added': 0, 'lines_removed': 0, 'authors': {}, 'is_merged': True, 'merge_base': '', 'unique_commits': []}
+		self.unmerged_branches = [] # list of branch names that are not merged into main branch
+		self.main_branch = 'master' # will be detected automatically
 
 	##
 	# This should be the main function to extract data from the repository.
@@ -814,6 +819,11 @@ class GitDataCollector(DataCollector):
 					print('Warning: failed to handle line "%s"' % line)
 					(files, inserted, deleted) = (0, 0, 0)
 		
+		# Branch analysis - collect unmerged branches and per-branch statistics
+		if conf['verbose']:
+			print('Analyzing branches and detecting unmerged branches...')
+		self._analyzeBranches()
+		
 		# Calculate repository size (this is slow as noted in TODO)
 		if conf['verbose']:
 			print('Calculating repository size...')
@@ -826,6 +836,183 @@ class GitDataCollector(DataCollector):
 		except (ValueError, IndexError):
 			print('Warning: Could not calculate repository size')
 			self.repository_size_mb = 0.0
+	
+	def _detectMainBranch(self):
+		"""Detect the main branch (master, main, develop, etc.)"""
+		# Try common main branch names in order of preference
+		main_branch_candidates = ['master', 'main', 'develop', 'development']
+		
+		# Get all local branches
+		branches_output = getpipeoutput(['git branch'])
+		local_branches = [line.strip().lstrip('* ') for line in branches_output.split('\n') if line.strip()]
+		
+		# Check if any of the common main branches exist
+		for candidate in main_branch_candidates:
+			if candidate in local_branches:
+				self.main_branch = candidate
+				return candidate
+		
+		# If none found, use the first branch or fall back to 'master'
+		if local_branches:
+			self.main_branch = local_branches[0]
+			return local_branches[0]
+		
+		# Fall back to master
+		self.main_branch = 'master'
+		return 'master'
+	
+	def _analyzeBranches(self):
+		"""Analyze all branches and detect unmerged ones"""
+		try:
+			# Detect main branch
+			main_branch = self._detectMainBranch()
+			if conf['verbose']:
+				print(f'Detected main branch: {main_branch}')
+			
+			# Get all local branches
+			branches_output = getpipeoutput(['git branch'])
+			all_branches = [line.strip().lstrip('* ') for line in branches_output.split('\n') if line.strip()]
+			
+			# Get unmerged branches (branches not merged into main)
+			try:
+				unmerged_output = getpipeoutput([f'git branch --no-merged {main_branch}'])
+				self.unmerged_branches = [line.strip().lstrip('* ') for line in unmerged_output.split('\n') 
+										if line.strip() and not line.strip().startswith('*')]
+			except:
+				# If main branch doesn't exist or command fails, assume all branches are unmerged
+				self.unmerged_branches = [b for b in all_branches if b != main_branch]
+			
+			if conf['verbose']:
+				print(f'Found {len(self.unmerged_branches)} unmerged branches: {", ".join(self.unmerged_branches)}')
+			
+			# Analyze each branch
+			for branch in all_branches:
+				if conf['verbose']:
+					print(f'Analyzing branch: {branch}')
+				self._analyzeBranch(branch, main_branch)
+				
+		except Exception as e:
+			if conf['verbose'] or conf['debug']:
+				print(f'Warning: Branch analysis failed: {e}')
+			# Initialize empty structures if analysis fails
+			self.unmerged_branches = []
+			self.branches = {}
+	
+	def _analyzeBranch(self, branch_name, main_branch):
+		"""Analyze a single branch for commits, authors, and line changes"""
+		try:
+			# Initialize branch data
+			self.branches[branch_name] = {
+				'commits': 0,
+				'lines_added': 0,
+				'lines_removed': 0,
+				'authors': {},
+				'is_merged': branch_name not in self.unmerged_branches,
+				'merge_base': '',
+				'unique_commits': []
+			}
+			
+			# Get merge base with main branch
+			try:
+				merge_base = getpipeoutput([f'git merge-base {branch_name} {main_branch}']).strip()
+				self.branches[branch_name]['merge_base'] = merge_base
+			except:
+				self.branches[branch_name]['merge_base'] = ''
+			
+			# Get commits unique to this branch (not in main branch)
+			if branch_name != main_branch:
+				try:
+					# Get commits that are in branch but not in main
+					unique_commits_output = getpipeoutput([f'git rev-list {branch_name} ^{main_branch}'])
+					unique_commits = [line.strip() for line in unique_commits_output.split('\n') if line.strip()]
+					self.branches[branch_name]['unique_commits'] = unique_commits
+					
+					# Analyze each unique commit
+					for commit in unique_commits:
+						self._analyzeBranchCommit(branch_name, commit)
+						
+				except:
+					# If command fails, analyze all commits in the branch
+					try:
+						all_commits_output = getpipeoutput([f'git rev-list {branch_name}'])
+						all_commits = [line.strip() for line in all_commits_output.split('\n') if line.strip()]
+						self.branches[branch_name]['unique_commits'] = all_commits[:50]  # Limit to avoid too much data
+						
+						for commit in all_commits[:50]:
+							self._analyzeBranchCommit(branch_name, commit)
+					except:
+						pass
+			else:
+				# For main branch, count all commits
+				try:
+					all_commits_output = getpipeoutput([f'git rev-list {branch_name}'])
+					all_commits = [line.strip() for line in all_commits_output.split('\n') if line.strip()]
+					self.branches[branch_name]['commits'] = len(all_commits)
+					self.branches[branch_name]['unique_commits'] = all_commits[:100]  # Limit for performance
+				except:
+					pass
+					
+		except Exception as e:
+			if conf['debug']:
+				print(f'Warning: Failed to analyze branch {branch_name}: {e}')
+	
+	def _analyzeBranchCommit(self, branch_name, commit_hash):
+		"""Analyze a single commit for branch statistics"""
+		try:
+			# Get commit author and timestamp
+			commit_info = getpipeoutput([f'git log -1 --pretty=format:"%aN %at" {commit_hash}'])
+			if not commit_info:
+				return
+				
+			parts = commit_info.rsplit(' ', 1)
+			if len(parts) != 2:
+				return
+				
+			author = parts[0]
+			try:
+				timestamp = int(parts[1])
+			except ValueError:
+				return
+			
+			# Update branch commit count
+			self.branches[branch_name]['commits'] += 1
+			
+			# Update author statistics for this branch
+			if author not in self.branches[branch_name]['authors']:
+				self.branches[branch_name]['authors'][author] = {
+					'commits': 0,
+					'lines_added': 0,
+					'lines_removed': 0
+				}
+			self.branches[branch_name]['authors'][author]['commits'] += 1
+			
+			# Get line changes for this commit
+			try:
+				numstat_output = getpipeoutput([f'git show --numstat --format="" {commit_hash}'])
+				for line in numstat_output.split('\n'):
+					if line.strip() and '\t' in line:
+						parts = line.split('\t')
+						if len(parts) >= 2:
+							try:
+								additions = int(parts[0]) if parts[0] != '-' else 0
+								deletions = int(parts[1]) if parts[1] != '-' else 0
+								
+								# Update branch statistics
+								self.branches[branch_name]['lines_added'] += additions
+								self.branches[branch_name]['lines_removed'] += deletions
+								
+								# Update author statistics for this branch
+								self.branches[branch_name]['authors'][author]['lines_added'] += additions
+								self.branches[branch_name]['authors'][author]['lines_removed'] += deletions
+								
+							except ValueError:
+								pass
+			except:
+				pass
+				
+		except Exception as e:
+			if conf['debug']:
+				print(f'Warning: Failed to analyze commit {commit_hash}: {e}')
 	
 	def refine(self):
 		# authors
@@ -977,6 +1164,53 @@ class GitDataCollector(DataCollector):
 		"""Get repository size in MB."""
 		return getattr(self, 'repository_size_mb', 0.0)
 	
+	def getBranches(self):
+		"""Get all branches with their statistics."""
+		return self.branches
+	
+	def getUnmergedBranches(self):
+		"""Get list of unmerged branch names."""
+		return self.unmerged_branches
+	
+	def getMainBranch(self):
+		"""Get the detected main branch name."""
+		return getattr(self, 'main_branch', 'master')
+	
+	def getBranchInfo(self, branch_name):
+		"""Get detailed information about a specific branch."""
+		return self.branches.get(branch_name, {})
+	
+	def getBranchAuthors(self, branch_name):
+		"""Get authors who contributed to a specific branch."""
+		branch_info = self.branches.get(branch_name, {})
+		return branch_info.get('authors', {})
+	
+	def getBranchesByCommits(self, limit=None):
+		"""Get branches sorted by number of commits."""
+		sorted_branches = sorted(self.branches.items(), 
+								key=lambda x: x[1].get('commits', 0), 
+								reverse=True)
+		if limit:
+			return sorted_branches[:limit]
+		return sorted_branches
+	
+	def getBranchesByLinesChanged(self, limit=None):
+		"""Get branches sorted by total lines changed."""
+		sorted_branches = sorted(self.branches.items(), 
+								key=lambda x: x[1].get('lines_added', 0) + x[1].get('lines_removed', 0), 
+								reverse=True)
+		if limit:
+			return sorted_branches[:limit]
+		return sorted_branches
+	
+	def getUnmergedBranchStats(self):
+		"""Get statistics for unmerged branches only."""
+		unmerged_stats = {}
+		for branch_name in self.unmerged_branches:
+			if branch_name in self.branches:
+				unmerged_stats[branch_name] = self.branches[branch_name]
+		return unmerged_stats
+	
 	def revToDate(self, rev):
 		stamp = int(getpipeoutput(['git log --pretty=format:%%at "%s" -n 1' % rev]))
 		return datetime.datetime.fromtimestamp(stamp).strftime('%Y-%m-%d')
@@ -1067,6 +1301,18 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<dt>Total Commits</dt><dd>%s (average %.1f commits per active day, %.1f per all days)</dd>' % (total_commits, avg_active, avg_all))
 		avg_per_author = float(total_commits) / total_authors if total_authors else 0.0
 		f.write('<dt>Authors</dt><dd>%s (average %.1f commits per author)</dd>' % (total_authors, avg_per_author))
+		
+		# Branch statistics
+		branches = data.getBranches() if hasattr(data, 'getBranches') else {}
+		unmerged_branches = data.getUnmergedBranches() if hasattr(data, 'getUnmergedBranches') else []
+		main_branch = data.getMainBranch() if hasattr(data, 'getMainBranch') else 'master'
+		
+		if branches:
+			f.write('<dt>Total Branches</dt><dd>%d</dd>' % len(branches))
+			if unmerged_branches:
+				f.write('<dt>Unmerged Branches</dt><dd>%d (%s)</dd>' % (len(unmerged_branches), ', '.join(unmerged_branches[:5]) + ('...' if len(unmerged_branches) > 5 else '')))
+			f.write('<dt>Main Branch</dt><dd>%s</dd>' % main_branch)
+		
 		f.write('</dl>')
 
 		f.write('</body>\n</html>')
@@ -1412,6 +1658,111 @@ class HTMLReportCreator(ReportCreator):
 		f.write('</table></div>')
 		f.write('<img src="domains.png" alt="Commits by Domains">')
 		fp.close()
+
+		f.write('</body></html>')
+		f.close()
+
+		###
+		# Branches
+		f = open(path + '/branches.html', 'w')
+		self.printHeader(f)
+		f.write('<h1>Branches</h1>')
+		self.printNav(f)
+
+		# Branch summary
+		branches = data.getBranches() if hasattr(data, 'getBranches') else {}
+		unmerged_branches = data.getUnmergedBranches() if hasattr(data, 'getUnmergedBranches') else []
+		main_branch = data.getMainBranch() if hasattr(data, 'getMainBranch') else 'master'
+		
+		f.write('<dl>')
+		f.write('<dt>Total Branches</dt><dd>%d</dd>' % len(branches))
+		if unmerged_branches:
+			f.write('<dt>Unmerged Branches</dt><dd>%d</dd>' % len(unmerged_branches))
+		f.write('<dt>Main Branch</dt><dd>%s</dd>' % main_branch)
+		f.write('</dl>')
+
+		if branches:
+			# Branches :: All Branches
+			f.write(html_header(2, 'All Branches'))
+			f.write('<table class="branches sortable" id="branches">')
+			f.write('<tr><th>Branch</th><th>Status</th><th>Commits</th><th>Lines Added</th><th>Lines Removed</th><th>Total Changes</th><th>Authors</th></tr>')
+			
+			# Sort branches by total changes (lines added + removed)
+			sorted_branches = sorted(branches.items(), 
+									key=lambda x: x[1].get('lines_added', 0) + x[1].get('lines_removed', 0), 
+									reverse=True)
+			
+			for branch_name, branch_info in sorted_branches:
+				status = 'Merged' if branch_info.get('is_merged', True) else 'Unmerged'
+				commits = branch_info.get('commits', 0)
+				lines_added = branch_info.get('lines_added', 0)
+				lines_removed = branch_info.get('lines_removed', 0)
+				total_changes = lines_added + lines_removed
+				authors_count = len(branch_info.get('authors', {}))
+				
+				# Highlight unmerged branches
+				row_class = 'class="unmerged"' if not branch_info.get('is_merged', True) else ''
+				f.write('<tr %s><td>%s</td><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td></tr>' % 
+						(row_class, branch_name, status, commits, lines_added, lines_removed, total_changes, authors_count))
+			f.write('</table>')
+
+			# Unmerged Branches Detail
+			if unmerged_branches:
+				f.write(html_header(2, 'Unmerged Branches Detail'))
+				f.write('<p>These branches have not been merged into the main branch (%s) and may represent ongoing work or abandoned features.</p>' % main_branch)
+				
+				f.write('<table class="unmerged-branches sortable" id="unmerged">')
+				f.write('<tr><th>Branch</th><th>Commits</th><th>Authors</th><th>Top Contributors</th><th>Lines Added</th><th>Lines Removed</th></tr>')
+				
+				unmerged_stats = data.getUnmergedBranchStats() if hasattr(data, 'getUnmergedBranchStats') else {}
+				
+				for branch_name in unmerged_branches:
+					if branch_name in unmerged_stats:
+						branch_info = unmerged_stats[branch_name]
+						commits = branch_info.get('commits', 0)
+						authors = branch_info.get('authors', {})
+						lines_added = branch_info.get('lines_added', 0)
+						lines_removed = branch_info.get('lines_removed', 0)
+						
+						# Get top contributors
+						top_contributors = sorted(authors.items(), key=lambda x: x[1].get('commits', 0), reverse=True)[:3]
+						contributors_str = ', '.join([f"{author} ({info.get('commits', 0)})" for author, info in top_contributors])
+						
+						f.write('<tr><td>%s</td><td>%d</td><td>%d</td><td>%s</td><td>%d</td><td>%d</td></tr>' % 
+								(branch_name, commits, len(authors), contributors_str, lines_added, lines_removed))
+				f.write('</table>')
+
+			# Branch Activity by Author
+			f.write(html_header(2, 'Branch Activity by Author'))
+			f.write('<p>This table shows which authors have contributed to which branches.</p>')
+			
+			# Collect all unique authors across all branches
+			all_authors = set()
+			for branch_info in branches.values():
+				all_authors.update(branch_info.get('authors', {}).keys())
+			
+			if all_authors and len(branches) > 1:
+				f.write('<table class="branch-authors sortable" id="branch-authors">')
+				header = '<tr><th>Author</th>'
+				for branch_name in sorted(branches.keys()):
+					header += '<th>%s</th>' % branch_name
+				header += '<th>Total Branches</th></tr>'
+				f.write(header)
+				
+				for author in sorted(all_authors):
+					row = '<tr><td>%s</td>' % author
+					branch_count = 0
+					for branch_name in sorted(branches.keys()):
+						branch_authors = branches[branch_name].get('authors', {})
+						if author in branch_authors:
+							commits = branch_authors[author].get('commits', 0)
+							row += '<td>%d</td>' % commits
+							branch_count += 1
+						else:
+							row += '<td>-</td>'
+					row += '<td>%d</td></tr>' % branch_count
+					f.write(row)
+				f.write('</table>')
 
 		f.write('</body></html>')
 		f.close()
@@ -1873,6 +2224,7 @@ plot 'pace_of_changes.dat' using 1:2 w lines lw 2
 <li><a href="index.html">General</a></li>
 <li><a href="activity.html">Activity</a></li>
 <li><a href="authors.html">Authors</a></li>
+<li><a href="branches.html">Branches</a></li>
 <li><a href="files.html">Files</a></li>
 <li><a href="lines.html">Lines</a></li>
 <li><a href="tags.html">Tags</a></li>
@@ -1905,6 +2257,7 @@ class PDFReportCreator(ReportCreator):
 		self._create_files_page(data)
 		self._create_lines_page(data)
 		self._create_tags_page(data)
+		self._create_branches_page(data)
 		
 		# Save PDF
 		pdf_path = os.path.join(path, f"gitstats_{data.projectname.replace(' ', '_')}.pdf")
@@ -1975,7 +2328,8 @@ class PDFReportCreator(ReportCreator):
 			'3. Authors Statistics',
 			'4. Files Statistics',
 			'5. Lines of Code Statistics',
-			'6. Tags Statistics'
+			'6. Tags Statistics',
+			'7. Branches Statistics'
 		]
 		
 		for section in sections:
@@ -2007,7 +2361,10 @@ class PDFReportCreator(ReportCreator):
 			('Comment Lines', f"{data.getTotalCommentLines()} ({(100.0 * data.getTotalCommentLines() / data.getTotalLOC()) if data.getTotalLOC() else 0.0:.1f}%)"),
 			('Blank Lines', f"{data.getTotalBlankLines()} ({(100.0 * data.getTotalBlankLines() / data.getTotalLOC()) if data.getTotalLOC() else 0.0:.1f}%)"),
 			('Total Commits', f"{total_commits} (average {(float(total_commits) / total_active_days) if total_active_days else 0.0:.1f} commits per active day, {(float(total_commits) / delta_days) if delta_days else 0.0:.1f} per all days)"),
-			('Authors', f"{total_authors} (average {(float(total_commits) / total_authors) if total_authors else 0.0:.1f} commits per author)")
+			('Authors', f"{total_authors} (average {(float(total_commits) / total_authors) if total_authors else 0.0:.1f} commits per author)"),
+			('Total Branches', str(len(data.getBranches()))),
+			('Unmerged Branches', str(len(data.getUnmergedBranches()))),
+			('Main Branch', data.main_branch if hasattr(data, 'main_branch') else 'N/A')
 		]
 		
 		# Display stats
@@ -2496,6 +2853,114 @@ class PDFReportCreator(ReportCreator):
 			self.pdf.cell(30, 6, tag_info['date'][:10], 1, 0, 'C')
 			self.pdf.cell(25, 6, str(tag_info['commits']), 1, 0, 'C')
 			self.pdf.cell(80, 6, display_authors, 1, 1, 'L')
+
+	def _create_branches_page(self, data):
+		"""Create the branches statistics page (mirrors branches.html)."""
+		self.pdf.add_page()
+		self.pdf.set_font('Arial', 'B', 20)
+		self.pdf.cell(0, 15, '7. Branches Statistics', 0, 1, 'L')
+		
+		self.pdf.set_font('Arial', '', 12)
+		
+		if not hasattr(data, 'branches') or not data.branches:
+			self.pdf.cell(0, 10, 'No branches found in repository.', 0, 1, 'L')
+			return
+		
+		# Basic branch stats
+		total_branches = len(data.getBranches())
+		unmerged_branches = data.getUnmergedBranches()
+		total_unmerged = len(unmerged_branches)
+		main_branch = data.main_branch if hasattr(data, 'main_branch') else 'N/A'
+		
+		stats = [
+			('Total branches', str(total_branches)),
+			('Unmerged branches', str(total_unmerged)),
+			('Main branch', main_branch),
+		]
+		
+		for label, value in stats:
+			self.pdf.cell(50, 8, f"{label}:", 0, 0, 'L')
+			self.pdf.cell(0, 8, str(value), 0, 1, 'L')
+		
+		self.pdf.ln(10)
+		
+		# Branches summary table
+		self.pdf.set_font('Arial', 'B', 12)
+		self.pdf.cell(0, 10, 'All Branches', 0, 1, 'L')
+		
+		# Table header
+		self.pdf.set_font('Arial', 'B', 9)
+		self.pdf.cell(35, 8, 'Branch Name', 1, 0, 'C')
+		self.pdf.cell(20, 8, 'Status', 1, 0, 'C')
+		self.pdf.cell(20, 8, 'Commits', 1, 0, 'C')
+		self.pdf.cell(25, 8, 'Lines Added', 1, 0, 'C')
+		self.pdf.cell(25, 8, 'Lines Removed', 1, 0, 'C')
+		self.pdf.cell(20, 8, 'Authors', 1, 0, 'C')
+		self.pdf.cell(45, 8, 'First Author', 1, 1, 'C')
+		
+		# Table data - sort by commits descending
+		self.pdf.set_font('Arial', '', 8)
+		branches_sorted = sorted(data.branches.items(), 
+								key=lambda x: x[1].get('commits', 0), reverse=True)
+		
+		for branch_name, branch_data in branches_sorted:
+			# Determine status
+			status = 'Unmerged' if branch_name in [b for b in unmerged_branches] else 'Merged'
+			
+			# Get branch statistics
+			commits = branch_data.get('commits', 0)
+			lines_added = branch_data.get('lines_added', 0)
+			lines_removed = branch_data.get('lines_removed', 0)
+			authors_count = len(branch_data.get('authors', {}))
+			
+			# Get first/main author
+			authors = branch_data.get('authors', {})
+			if authors:
+				first_author = max(authors.items(), key=lambda x: x[1])[0]
+				first_author = first_author[:20] + "..." if len(first_author) > 23 else first_author
+			else:
+				first_author = 'N/A'
+			
+			# Truncate branch name if too long
+			display_branch = branch_name[:18] + "..." if len(branch_name) > 21 else branch_name
+			
+			self.pdf.cell(35, 6, display_branch, 1, 0, 'L')
+			self.pdf.cell(20, 6, status, 1, 0, 'C')
+			self.pdf.cell(20, 6, str(commits), 1, 0, 'C')
+			self.pdf.cell(25, 6, str(lines_added), 1, 0, 'C')
+			self.pdf.cell(25, 6, str(lines_removed), 1, 0, 'C')
+			self.pdf.cell(20, 6, str(authors_count), 1, 0, 'C')
+			self.pdf.cell(45, 6, first_author, 1, 1, 'L')
+		
+		# Unmerged branches detail section
+		if total_unmerged > 0:
+			self.pdf.ln(10)
+			self.pdf.set_font('Arial', 'B', 14)
+			self.pdf.cell(0, 10, f'Unmerged Branches Details ({total_unmerged})', 0, 1, 'L')
+			
+			self.pdf.set_font('Arial', '', 10)
+			for branch_name in unmerged_branches:
+				if branch_name in data.branches:
+					branch_data = data.branches[branch_name]
+					
+					self.pdf.set_font('Arial', 'B', 10)
+					self.pdf.cell(0, 8, f"Branch: {branch_name}", 0, 1, 'L')
+					
+					self.pdf.set_font('Arial', '', 9)
+					self.pdf.cell(20, 6, f"  Commits: {branch_data.get('commits', 0)}", 0, 1, 'L')
+					self.pdf.cell(20, 6, f"  Lines: +{branch_data.get('lines_added', 0)} -{branch_data.get('lines_removed', 0)}", 0, 1, 'L')
+					
+					# Show authors
+					authors = branch_data.get('authors', {})
+					if authors:
+						author_list = sorted(authors.items(), key=lambda x: x[1], reverse=True)
+						author_str = ', '.join([f"{author}({commits})" for author, commits in author_list[:3]])
+						if len(author_list) > 3:
+							author_str += f" and {len(author_list) - 3} more"
+						self.pdf.cell(20, 6, f"  Authors: {author_str}", 0, 1, 'L')
+					
+					self.pdf.ln(2)
+		
 		
 		
 def usage():

@@ -143,3 +143,29 @@ h2 a {
 .moreauthors {
 	font-size: 80%;
 }
+
+/* Branch-specific styles */
+.branches tr.unmerged {
+	background-color: #ffd0d0 !important;
+}
+
+.branches tr.unmerged:hover {
+	background-color: #ffb0b0 !important;
+}
+
+.unmerged-branches {
+	border: 2px solid #ff6666;
+}
+
+.unmerged-branches th {
+	background-color: #ffcccc;
+}
+
+.branch-authors td {
+	text-align: center;
+}
+
+.branch-authors td:first-child {
+	text-align: left;
+	font-weight: bold;
+}
