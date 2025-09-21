@@ -3249,15 +3249,105 @@ class PDFReportCreator(ReportCreator):
 		ReportCreator.__init__(self)
 		self.pdf = None
 		self.output_path = None
+		# Define color schemes for better visual appeal
+		self.colors = {
+			'header': (41, 128, 185),    # Blue
+			'text': (0, 0, 0),           # Black
+			'table_header': (52, 152, 219), # Light blue
+			'table_alt': (245, 245, 245)    # Light gray
+		}
+	
+	def _set_color(self, color_type='text', fill=False):
+		"""Set text or fill color using predefined color scheme."""
+		if color_type in self.colors:
+			r, g, b = self.colors[color_type]
+			if fill:
+				self.pdf.set_fill_color(r, g, b)
+			else:
+				self.pdf.set_text_color(r, g, b)
+	
+	def _add_section_header(self, title, level=1):
+		"""Add a standardized section header with consistent formatting."""
+		# Add some space before header
+		self.pdf.ln(h=10)
+		
+		# Set header color and font
+		self._set_color('header')
+		if level == 1:
+			self.pdf.set_font('helvetica', 'B', 20)
+			height = 15
+		elif level == 2:
+			self.pdf.set_font('helvetica', 'B', 16)
+			height = 12
+		else:
+			self.pdf.set_font('helvetica', 'B', 14)
+			height = 10
+		
+		# Add the header
+		self.pdf.cell(0, height, title, 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
+		
+		# Reset color to text
+		self._set_color('text')
+		self.pdf.ln(h=5)  # Small gap after header
+	
+	def _create_table_header(self, headers, widths=None, font_size=9):
+		"""Create a standardized table header with consistent formatting."""
+		if widths is None:
+			# Auto-calculate widths if not provided
+			total_width = 180  # Reasonable default
+			widths = [total_width // len(headers)] * len(headers)
+		
+		# Set header styling
+		self._set_color('table_header')
+		self._set_color('table_header', fill=True)
+		self.pdf.set_font('helvetica', 'B', font_size)
+		
+		# Create header cells
+		for i, (header, width) in enumerate(zip(headers, widths)):
+			is_last = (i == len(headers) - 1)
+			new_x = XPos.LMARGIN if is_last else XPos.RIGHT
+			new_y = YPos.NEXT if is_last else YPos.TOP
+			
+			self.pdf.cell(width, 8, str(header), 1, 
+						 new_x=new_x, new_y=new_y, align='C', fill=True)
+		
+		# Reset styling for table content
+		self._set_color('text')
+		self.pdf.set_font('helvetica', '', font_size - 1)
+	
+	def _create_table_row(self, values, widths, alternate_row=False, font_size=8):
+		"""Create a table row with optional alternating background."""
+		if alternate_row:
+			self._set_color('table_alt', fill=True)
+		
+		for i, (value, width) in enumerate(zip(values, widths)):
+			is_last = (i == len(values) - 1)
+			new_x = XPos.LMARGIN if is_last else XPos.RIGHT
+			new_y = YPos.NEXT if is_last else YPos.TOP
+			
+			# Truncate long values to fit
+			str_value = str(value)
+			if len(str_value) > width // 3:  # Rough character width estimation
+				str_value = str_value[:width//3-2] + '...'
+			
+			self.pdf.cell(width, 6, str_value, 1,
+						 new_x=new_x, new_y=new_y, align='C', fill=alternate_row)
 	
 	def create(self, data, path):
 		ReportCreator.create(self, data, path)
 		self.title = data.projectname
 		self.output_path = path
 		
-		# Initialize PDF document
+		# Initialize PDF document with fpdf2 features
 		self.pdf = FPDF()
 		self.pdf.set_auto_page_break(auto=True, margin=15)
+		
+		# Set metadata for better PDF properties
+		self.pdf.set_title(f"GitStats Report - {data.projectname}")
+		self.pdf.set_author("GitStats")
+		self.pdf.set_subject(f"Git repository analysis for {data.projectname}")
+		self.pdf.set_creator("GitStats with fpdf2")
+		self.pdf.set_keywords("git,statistics,analysis,repository")
 		
 		# Create all pages (tabs)
 		self._create_title_page(data)
@@ -3270,13 +3360,24 @@ class PDFReportCreator(ReportCreator):
 		self._create_tags_page(data)
 		self._create_branches_page(data)
 		
-		# Save PDF
+		# Save PDF with fpdf2's enhanced output method
 		pdf_path = os.path.join(path, f"gitstats_{data.projectname.replace(' ', '_')}.pdf")
-		self.pdf.output(pdf_path)
-		print(f"PDF report saved to: {pdf_path}")
+		
+		# Use fpdf2's output method with proper file handling
+		try:
+			self.pdf.output(pdf_path)
+			print(f"PDF report saved to: {pdf_path}")
+			# Verify file was created and has content
+			if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
+				print(f"PDF file size: {os.path.getsize(pdf_path)} bytes")
+			else:
+				print("Warning: PDF file was not created properly")
+		except Exception as e:
+			print(f"Error saving PDF: {e}")
+			raise
 	
 	def _add_chart_if_exists(self, chart_filename, width=None, height=None):
-		"""Add a chart image to the PDF if it exists."""
+		"""Add a chart image to the PDF if it exists, with improved fpdf2 handling."""
 		chart_path = os.path.join(self.output_path, chart_filename)
 		if os.path.exists(chart_path):
 			try:
@@ -3284,22 +3385,29 @@ class PDFReportCreator(ReportCreator):
 				x = self.pdf.get_x()
 				y = self.pdf.get_y()
 				
-				# Calculate dimensions
+				# Calculate dimensions with better defaults
 				if width is None:
 					width = 150  # Default width
 				if height is None:
 					height = 80  # Default height
 				
-				# Check if there's enough space, if not add page break
-				if y + height > 280:  # 280 is roughly page height minus margin
+				# Get page dimensions for better space calculation
+				page_width = self.pdf.w
+				page_height = self.pdf.h
+				margin = 15  # Same as auto_page_break margin
+				
+				# Check if there's enough space on current page
+				if y + height > (page_height - margin):
 					self.pdf.add_page()
+					x = self.pdf.get_x()
 					y = self.pdf.get_y()
 				
-				# Add image
-				self.pdf.image(chart_path, x, y, width, height)
+				# Add image with fpdf2's enhanced image handling
+				# fpdf2 automatically handles different image formats
+				self.pdf.image(chart_path, x=x, y=y, w=width, h=height)
 				
-				# Move cursor below image
-				self.pdf.set_y(y + height + 5)
+				# Move cursor below image with better spacing
+				self.pdf.set_y(y + height + 8)  # Increased spacing for better layout
 				
 				return True
 			except Exception as e:
