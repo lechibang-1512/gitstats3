@@ -12,6 +12,7 @@ import time
 import zlib
 from collections import defaultdict
 from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 
 if sys.version_info < (3, 6):
 	print("Python 3.6 or higher is required for gitstats", file=sys.stderr)
@@ -458,7 +459,7 @@ class GitDataCollector(DataCollector):
 				continue
 			prev = tag
 			for line in output.split('\n'):
-				parts = re.split(r'\s+', line, 2)
+				parts = re.split(r'\s+', line, maxsplit=2)
 				commits = int(parts[1])
 				author = parts[2]
 				self.tags[tag]['commits'] += commits
@@ -611,7 +612,7 @@ class GitDataCollector(DataCollector):
 		for line in lines:
 			if len(line) == 0:
 				continue
-			parts = re.split(r'\s+', line, 4)
+			parts = re.split(r'\s+', line, maxsplit=4)
 			if parts[0] == '160000' and parts[3] == '-':
 				# skip submodules
 				continue
@@ -3309,29 +3310,29 @@ class PDFReportCreator(ReportCreator):
 	def _create_title_page(self, data):
 		"""Create the title page of the PDF report."""
 		self.pdf.add_page()
-		self.pdf.set_font('Arial', 'B', 24)
-		self.pdf.cell(0, 20, f'GitStats Report - {data.projectname}', 0, 1, 'C')
+		self.pdf.set_font('helvetica', 'B', 24)
+		self.pdf.cell(0, 20, f'GitStats Report - {data.projectname}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
-		self.pdf.ln(10)
-		self.pdf.set_font('Arial', '', 12)
+		self.pdf.ln(h=10)
+		self.pdf.set_font('helvetica', '', 12)
 		format = '%Y-%m-%d %H:%M:%S'
 		
 		# Report generation info
-		self.pdf.cell(0, 10, f'Generated: {datetime.datetime.now().strftime(format)}', 0, 1)
-		self.pdf.cell(0, 10, f'Generator: GitStats (version {getversion()})', 0, 1)
-		self.pdf.cell(0, 10, f'Git Version: {getgitversion()}', 0, 1)
+		self.pdf.cell(0, 10, f'Generated: {datetime.datetime.now().strftime(format)}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+		self.pdf.cell(0, 10, f'Generator: GitStats (version {getversion()})', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+		self.pdf.cell(0, 10, f'Git Version: {getgitversion()}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 		if getgnuplotversion():
-			self.pdf.cell(0, 10, f'Gnuplot Version: {getgnuplotversion()}', 0, 1)
+			self.pdf.cell(0, 10, f'Gnuplot Version: {getgnuplotversion()}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 		
-		self.pdf.ln(10)
-		self.pdf.cell(0, 10, f'Report Period: {data.getFirstCommitDate().strftime(format)} to {data.getLastCommitDate().strftime(format)}', 0, 1)
+		self.pdf.ln(h=10)
+		self.pdf.cell(0, 10, f'Report Period: {data.getFirstCommitDate().strftime(format)} to {data.getLastCommitDate().strftime(format)}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 		
 		# Table of contents
-		self.pdf.ln(15)
-		self.pdf.set_font('Arial', 'B', 16)
-		self.pdf.cell(0, 10, 'Table of Contents', 0, 1, 'L')
+		self.pdf.ln(h=15)
+		self.pdf.set_font('helvetica', 'B', 16)
+		self.pdf.cell(0, 10, 'Table of Contents', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('Arial', '', 12)
+		self.pdf.set_font('helvetica', '', 12)
 		sections = [
 			'1. General Statistics',
 			'2. Activity Statistics', 
@@ -3344,15 +3345,15 @@ class PDFReportCreator(ReportCreator):
 		]
 		
 		for section in sections:
-			self.pdf.cell(0, 8, section, 0, 1, 'L')
+			self.pdf.cell(0, 8, section, 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 	
 	def _create_general_page(self, data):
 		"""Create the general statistics page (mirrors index.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '1. General Statistics', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 20)
+		self.pdf.cell(0, 15, '1. General Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('Arial', '', 12)
+		self.pdf.set_font('helvetica', '', 12)
 		
 		# Calculate basic stats
 		total_commits = data.getTotalCommits()
@@ -3380,95 +3381,95 @@ class PDFReportCreator(ReportCreator):
 		
 		# Display stats
 		for label, value in stats:
-			self.pdf.cell(50, 8, f"{label}:", 0, 0, 'L')
-			self.pdf.cell(0, 8, str(value), 0, 1, 'L')
+			self.pdf.cell(50, 8, f"{label}:", 0, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+			self.pdf.cell(0, 8, str(value), 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 	
 	def _create_activity_page(self, data):
 		"""Create the activity statistics page with charts (mirrors activity.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '2. Activity Statistics', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 20)
+		self.pdf.cell(0, 15, '2. Activity Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Weekly activity section
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Weekly Activity', 0, 1, 'L')
-		self.pdf.set_font('Arial', '', 10)
-		self.pdf.cell(0, 6, 'Last 32 weeks activity (see chart below)', 0, 1, 'L')
-		self.pdf.ln(5)
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Weekly Activity', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
+		self.pdf.set_font('helvetica', '', 10)
+		self.pdf.cell(0, 6, 'Last 32 weeks activity (see chart below)', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
+		self.pdf.ln(h=5)
 		
 		# Hour of Day section
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Hour of Day', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Hour of Day', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('Arial', '', 10)
+		self.pdf.set_font('helvetica', '', 10)
 		hour_of_day = data.getActivityByHourOfDay()
 		total_commits = data.getTotalCommits()
 		
 		# Create hour of day table
-		self.pdf.set_font('Arial', 'B', 8)
-		self.pdf.cell(20, 6, 'Hour', 1, 0, 'C')
+		self.pdf.set_font('helvetica', 'B', 8)
+		self.pdf.cell(20, 6, 'Hour', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		for h in range(0, 24):
-			self.pdf.cell(7, 6, str(h), 1, 0, 'C')
+			self.pdf.cell(7, 6, str(h), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		self.pdf.ln()
 		
-		self.pdf.cell(20, 6, 'Commits', 1, 0, 'C')
+		self.pdf.cell(20, 6, 'Commits', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		for h in range(0, 24):
 			commits = hour_of_day.get(h, 0)
-			self.pdf.cell(7, 6, str(commits), 1, 0, 'C')
+			self.pdf.cell(7, 6, str(commits), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		self.pdf.ln()
 		
-		self.pdf.cell(20, 6, '%', 1, 0, 'C')
+		self.pdf.cell(20, 6, '%', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		for h in range(0, 24):
 			commits = hour_of_day.get(h, 0)
 			percent = (100.0 * commits / total_commits) if total_commits else 0.0
-			self.pdf.cell(7, 6, f"{percent:.1f}", 1, 0, 'C')
-		self.pdf.ln(10)
+			self.pdf.cell(7, 6, f"{percent:.1f}", 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.ln(h=10)
 		
 		# Add hour of day chart
 		self._add_chart_if_exists('hour_of_day.png', 180, 90)
 		
 		# Day of Week section
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Day of Week', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Day of Week', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('Arial', '', 10)
+		self.pdf.set_font('helvetica', '', 10)
 		day_of_week = data.getActivityByDayOfWeek()
 		
 		# Create day of week table
-		self.pdf.set_font('Arial', 'B', 10)
-		self.pdf.cell(30, 8, 'Day', 1, 0, 'C')
-		self.pdf.cell(30, 8, 'Total (%)', 1, 1, 'C')
+		self.pdf.set_font('helvetica', 'B', 10)
+		self.pdf.cell(30, 8, 'Day', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(30, 8, 'Total (%)', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
-		self.pdf.set_font('Arial', '', 10)
+		self.pdf.set_font('helvetica', '', 10)
 		for d in range(0, 7):
 			day_name = WEEKDAYS[d]
 			commits = day_of_week.get(d, 0)
 			percent = (100.0 * commits / total_commits) if total_commits else 0.0
-			self.pdf.cell(30, 6, day_name, 1, 0, 'L')
-			self.pdf.cell(30, 6, f"{commits} ({percent:.2f}%)", 1, 1, 'L')
+			self.pdf.cell(30, 6, day_name, 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+			self.pdf.cell(30, 6, f"{commits} ({percent:.2f}%)", 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.ln(5)
+		self.pdf.ln(h=5)
 		self._add_chart_if_exists('day_of_week.png', 180, 90)
 		
 		# Month of Year section  
 		if hasattr(data, 'activity_by_month_of_year'):
-			self.pdf.set_font('Arial', 'B', 14) 
-			self.pdf.cell(0, 10, 'Month of Year', 0, 1, 'L')
+			self.pdf.set_font('helvetica', 'B', 14) 
+			self.pdf.cell(0, 10, 'Month of Year', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
-			self.pdf.set_font('Arial', 'B', 10)
-			self.pdf.cell(30, 8, 'Month', 1, 0, 'C')
-			self.pdf.cell(40, 8, 'Commits (%)', 1, 1, 'C')
+			self.pdf.set_font('helvetica', 'B', 10)
+			self.pdf.cell(30, 8, 'Month', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(40, 8, 'Commits (%)', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 			
-			self.pdf.set_font('Arial', '', 10)
+			self.pdf.set_font('helvetica', '', 10)
 			for mm in range(1, 13):
 				commits = data.activity_by_month_of_year.get(mm, 0)
 				percent = (100.0 * commits / total_commits) if total_commits else 0.0
-				self.pdf.cell(30, 6, str(mm), 1, 0, 'C')
-				self.pdf.cell(40, 6, f"{commits} ({percent:.2f} %)", 1, 1, 'L')
+				self.pdf.cell(30, 6, str(mm), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(40, 6, f"{commits} ({percent:.2f} %)", 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
-			self.pdf.ln(5)
+			self.pdf.ln(h=5)
 			self._add_chart_if_exists('month_of_year.png', 180, 90)
 		
 		# Add page break for next major chart
@@ -3476,52 +3477,52 @@ class PDFReportCreator(ReportCreator):
 			self.pdf.add_page()
 		
 		# Commits by year/month chart
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Commits by Year/Month', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Commits by Year/Month', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('commits_by_year_month.png', 180, 100)
 		
 		# Commits by year chart 
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Commits by Year', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Commits by Year', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('commits_by_year.png', 180, 100)
 	
 	def _create_authors_page(self, data):
 		"""Create the authors statistics page with charts (mirrors authors.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '3. Authors Statistics', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 20)
+		self.pdf.cell(0, 15, '3. Authors Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# List of Authors table
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'List of Authors', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'List of Authors', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		authors = data.getAuthors(conf['max_authors'])
 		
 		# Table header
-		self.pdf.set_font('Arial', 'B', 8)
-		self.pdf.cell(35, 6, 'Author', 1, 0, 'C')
-		self.pdf.cell(20, 6, 'Commits (%)', 1, 0, 'C')
-		self.pdf.cell(15, 6, '+ lines', 1, 0, 'C')
-		self.pdf.cell(15, 6, '- lines', 1, 0, 'C')
-		self.pdf.cell(25, 6, 'First commit', 1, 0, 'C')
-		self.pdf.cell(25, 6, 'Last commit', 1, 0, 'C')
-		self.pdf.cell(20, 6, 'Age', 1, 0, 'C')
-		self.pdf.cell(15, 6, 'Active days', 1, 1, 'C')
+		self.pdf.set_font('helvetica', 'B', 8)
+		self.pdf.cell(35, 6, 'Author', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(20, 6, 'Commits (%)', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(15, 6, '+ lines', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(15, 6, '- lines', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(25, 6, 'First commit', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(25, 6, 'Last commit', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(20, 6, 'Age', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(15, 6, 'Active days', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
 		# Table data
-		self.pdf.set_font('Arial', '', 7)
+		self.pdf.set_font('helvetica', '', 7)
 		for author in authors[:20]:  # Top 20 authors
 			info = data.getAuthorInfo(author)
 			
 			# Truncate long author names
 			display_author = author[:18] + "..." if len(author) > 21 else author
 			
-			self.pdf.cell(35, 5, display_author, 1, 0, 'L')
-			self.pdf.cell(20, 5, f"{info['commits']} ({info['commits_frac']:.1f}%)", 1, 0, 'C')
-			self.pdf.cell(15, 5, str(info['lines_added']), 1, 0, 'C')
-			self.pdf.cell(15, 5, str(info['lines_removed']), 1, 0, 'C')
-			self.pdf.cell(25, 5, info['date_first'][:10], 1, 0, 'C')
-			self.pdf.cell(25, 5, info['date_last'][:10], 1, 0, 'C')
+			self.pdf.cell(35, 5, display_author, 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+			self.pdf.cell(20, 5, f"{info['commits']} ({info['commits_frac']:.1f}%)", 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(15, 5, str(info['lines_added']), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(15, 5, str(info['lines_removed']), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 5, info['date_first'][:10], 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 5, info['date_last'][:10], 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 			
 			# Calculate age
 			try:
@@ -3533,42 +3534,42 @@ class PDFReportCreator(ReportCreator):
 			
 			active_days = len(info.get('active_days', [0])) if 'active_days' in info else 1
 			
-			self.pdf.cell(20, 5, age_text[:12], 1, 0, 'C')
-			self.pdf.cell(15, 5, str(active_days), 1, 1, 'C')
+			self.pdf.cell(20, 5, age_text[:12], 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(15, 5, str(active_days), 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 		
 		# Lines of code by author chart
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Cumulated Added Lines of Code per Author', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Cumulated Added Lines of Code per Author', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('lines_of_code_by_author.png', 180, 110)
 		
 		# Commits per author chart
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Commits per Author', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Commits per Author', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('commits_by_author.png', 180, 110)
 		
 		# Commits by domains chart
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Commits by Domains', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Commits by Domains', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('domains.png', 180, 100)
 	
 	def _create_team_analysis_page(self, data):
 		"""Create the team analysis page for comprehensive team evaluation (new feature)."""
 		self.pdf.add_page()
-		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '4. Team Analysis', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 20)
+		self.pdf.cell(0, 15, '4. Team Analysis', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Team Overview
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Team Overview', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Team Overview', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('Arial', '', 12)
+		self.pdf.set_font('helvetica', '', 12)
 		total_authors = data.getTotalAuthors()
 		work_distribution = data.getTeamWorkDistribution()
 		
-		self.pdf.cell(50, 8, 'Total Team Members:', 0, 0, 'L')
-		self.pdf.cell(0, 8, str(total_authors), 0, 1, 'L')
+		self.pdf.cell(50, 8, 'Total Team Members:', 0, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+		self.pdf.cell(0, 8, str(total_authors), 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Calculate work distribution metrics
 		commit_contributions = [dist['commit_percentage'] for dist in work_distribution.values()]
@@ -3577,48 +3578,48 @@ class PDFReportCreator(ReportCreator):
 			min_contrib = min(commit_contributions)
 			avg_contrib = sum(commit_contributions) / len(commit_contributions)
 			
-			self.pdf.cell(50, 8, 'Work Distribution:', 0, 0, 'L')
-			self.pdf.cell(0, 8, f'Max: {max_contrib:.1f}%, Min: {min_contrib:.1f}%, Avg: {avg_contrib:.1f}%', 0, 1, 'L')
+			self.pdf.cell(50, 8, 'Work Distribution:', 0, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+			self.pdf.cell(0, 8, f'Max: {max_contrib:.1f}%, Min: {min_contrib:.1f}%, Avg: {avg_contrib:.1f}%', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 		
 		# Team Performance Rankings
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Team Performance Rankings', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Team Performance Rankings', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Top Contributors
 		contrib_ranking = data.getAuthorsByContribution()
 		efficiency_ranking = data.getAuthorsByEfficiency()
 		
-		self.pdf.set_font('Arial', 'B', 12)
-		self.pdf.cell(0, 8, 'Top 10 Contributors (by commit percentage):', 0, 1, 'L')
-		self.pdf.set_font('Arial', '', 10)
+		self.pdf.set_font('helvetica', 'B', 12)
+		self.pdf.cell(0, 8, 'Top 10 Contributors (by commit percentage):', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
+		self.pdf.set_font('helvetica', '', 10)
 		
 		for i, (author, percentage) in enumerate(contrib_ranking[:10], 1):
 			display_author = author[:30] + "..." if len(author) > 33 else author
-			self.pdf.cell(0, 6, f'{i}. {display_author} ({percentage:.1f}%)', 0, 1, 'L')
+			self.pdf.cell(0, 6, f'{i}. {display_author} ({percentage:.1f}%)', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.ln(5)
+		self.pdf.ln(h=5)
 		
 		# Team Performance Table
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Detailed Performance Analysis', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Detailed Performance Analysis', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		team_performance = data.getTeamPerformance()
 		commit_patterns = data.getCommitPatterns()
 		
 		# Table header
-		self.pdf.set_font('Arial', 'B', 8)
-		self.pdf.cell(35, 6, 'Author', 1, 0, 'C')
-		self.pdf.cell(20, 6, 'Commits', 1, 0, 'C')
-		self.pdf.cell(20, 6, 'Contrib %', 1, 0, 'C')
-		self.pdf.cell(25, 6, 'Efficiency', 1, 0, 'C')
-		self.pdf.cell(25, 6, 'Consistency', 1, 0, 'C')
-		self.pdf.cell(25, 6, 'Leadership', 1, 0, 'C')
-		self.pdf.cell(25, 6, 'Overall', 1, 1, 'C')
+		self.pdf.set_font('helvetica', 'B', 8)
+		self.pdf.cell(35, 6, 'Author', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(20, 6, 'Commits', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(20, 6, 'Contrib %', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(25, 6, 'Efficiency', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(25, 6, 'Consistency', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(25, 6, 'Leadership', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(25, 6, 'Overall', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
 		# Table data - show top 15 performers
-		self.pdf.set_font('Arial', '', 7)
+		self.pdf.set_font('helvetica', '', 7)
 		sorted_authors = sorted(team_performance.items(), key=lambda x: x[1].get('overall_score', 0), reverse=True)
 		
 		for author, perf in sorted_authors[:15]:
@@ -3634,29 +3635,29 @@ class PDFReportCreator(ReportCreator):
 			# Truncate long author names
 			display_author = author[:18] + "..." if len(author) > 21 else author
 			
-			self.pdf.cell(35, 5, display_author, 1, 0, 'L')
-			self.pdf.cell(20, 5, str(commits), 1, 0, 'C')
-			self.pdf.cell(20, 5, f'{contrib_pct:.1f}%', 1, 0, 'C')
-			self.pdf.cell(25, 5, f'{efficiency:.1f}', 1, 0, 'C')
-			self.pdf.cell(25, 5, f'{consistency:.1f}', 1, 0, 'C')
-			self.pdf.cell(25, 5, f'{leadership:.1f}', 1, 0, 'C')
-			self.pdf.cell(25, 5, f'{overall:.1f}', 1, 1, 'C')
+			self.pdf.cell(35, 5, display_author, 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+			self.pdf.cell(20, 5, str(commits), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(20, 5, f'{contrib_pct:.1f}%', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 5, f'{efficiency:.1f}', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 5, f'{consistency:.1f}', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 5, f'{leadership:.1f}', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 5, f'{overall:.1f}', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 		
 		# Team Assessment Conclusion
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Team Assessment Conclusion', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Team Assessment Conclusion', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('Arial', '', 10)
+		self.pdf.set_font('helvetica', '', 10)
 		
 		# Generate team insights
 		top_contributor = contrib_ranking[0] if contrib_ranking else ("N/A", 0)
 		most_efficient = efficiency_ranking[0] if efficiency_ranking else ("N/A", 0)
 		
-		self.pdf.cell(0, 6, f'- Top contributor: {top_contributor[0]} ({top_contributor[1]:.1f}% of commits)', 0, 1, 'L')
-		self.pdf.cell(0, 6, f'- Most efficient developer: {most_efficient[0]} (score: {most_efficient[1]:.1f})', 0, 1, 'L')
-		self.pdf.cell(0, 6, f'- Team size: {total_authors} active contributors', 0, 1, 'L')
+		self.pdf.cell(0, 6, f'- Top contributor: {top_contributor[0]} ({top_contributor[1]:.1f}% of commits)', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
+		self.pdf.cell(0, 6, f'- Most efficient developer: {most_efficient[0]} (score: {most_efficient[1]:.1f})', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
+		self.pdf.cell(0, 6, f'- Team size: {total_authors} active contributors', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Work distribution assessment
 		if commit_contributions:
@@ -3668,7 +3669,7 @@ class PDFReportCreator(ReportCreator):
 			else:
 				distribution_assessment = "Highly concentrated (few dominant contributors)"
 			
-			self.pdf.cell(0, 6, f'- Work distribution: {distribution_assessment}', 0, 1, 'L')
+			self.pdf.cell(0, 6, f'- Work distribution: {distribution_assessment}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 	
 	def _calculate_gini_coefficient(self, values):
 		"""Calculate Gini coefficient for work distribution analysis."""
@@ -3693,14 +3694,14 @@ class PDFReportCreator(ReportCreator):
 	def _create_files_page(self, data):
 		"""Create the files statistics page with charts (mirrors files.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '5. Files Statistics', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 20)
+		self.pdf.cell(0, 15, '5. Files Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Basic file stats
 		total_files = data.getTotalFiles()
 		total_loc = data.getTotalLOC()
 		
-		self.pdf.set_font('Arial', '', 12)
+		self.pdf.set_font('helvetica', '', 12)
 		stats = [
 			('Total files', str(total_files)),
 			('Total lines', str(total_loc)),
@@ -3721,27 +3722,27 @@ class PDFReportCreator(ReportCreator):
 			pass
 		
 		for label, value in stats:
-			self.pdf.cell(50, 8, f"{label}:", 0, 0, 'L')
-			self.pdf.cell(0, 8, str(value), 0, 1, 'L')
+			self.pdf.cell(50, 8, f"{label}:", 0, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+			self.pdf.cell(0, 8, str(value), 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 		
 		# File extensions
 		if hasattr(data, 'extensions') and data.extensions:
-			self.pdf.set_font('Arial', 'B', 14)
-			self.pdf.cell(0, 10, 'File Extensions', 0, 1, 'L')
+			self.pdf.set_font('helvetica', 'B', 14)
+			self.pdf.cell(0, 10, 'File Extensions', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
 			# Table header
-			self.pdf.set_font('Arial', 'B', 9)
-			self.pdf.cell(25, 8, 'Extension', 1, 0, 'C')
-			self.pdf.cell(20, 8, 'Files', 1, 0, 'C')
-			self.pdf.cell(20, 8, '% Files', 1, 0, 'C')
-			self.pdf.cell(25, 8, 'Lines', 1, 0, 'C')
-			self.pdf.cell(20, 8, '% Lines', 1, 0, 'C')
-			self.pdf.cell(25, 8, 'Lines/File', 1, 1, 'C')
+			self.pdf.set_font('helvetica', 'B', 9)
+			self.pdf.cell(25, 8, 'Extension', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(20, 8, 'Files', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(20, 8, '% Files', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 8, 'Lines', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(20, 8, '% Lines', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 8, 'Lines/File', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 			
 			# Table data - show top extensions
-			self.pdf.set_font('Arial', '', 8)
+			self.pdf.set_font('helvetica', '', 8)
 			sorted_extensions = sorted(data.extensions.items(), 
 									 key=lambda x: x[1]['files'], reverse=True)[:15]
 			
@@ -3754,31 +3755,31 @@ class PDFReportCreator(ReportCreator):
 				
 				display_ext = ext if ext else '(no ext)'
 				
-				self.pdf.cell(25, 6, display_ext[:12], 1, 0, 'L')
-				self.pdf.cell(20, 6, str(files), 1, 0, 'C')
-				self.pdf.cell(20, 6, f"{files_percentage:.1f}%", 1, 0, 'C')
-				self.pdf.cell(25, 6, str(lines), 1, 0, 'C')
-				self.pdf.cell(20, 6, f"{loc_percentage:.1f}%", 1, 0, 'C')
-				self.pdf.cell(25, 6, str(lines_per_file), 1, 1, 'C')
+				self.pdf.cell(25, 6, display_ext[:12], 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+				self.pdf.cell(20, 6, str(files), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(20, 6, f"{files_percentage:.1f}%", 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(25, 6, str(lines), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(20, 6, f"{loc_percentage:.1f}%", 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(25, 6, str(lines_per_file), 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 		
 		# SLOC Breakdown by Extension
 		sloc_data = data.getSLOCByExtension()
 		if sloc_data:
-			self.pdf.set_font('Arial', 'B', 14)
-			self.pdf.cell(0, 10, 'Source Lines of Code (SLOC) Breakdown', 0, 1, 'L')
+			self.pdf.set_font('helvetica', 'B', 14)
+			self.pdf.cell(0, 10, 'Source Lines of Code (SLOC) Breakdown', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
 			# Table header
-			self.pdf.set_font('Arial', 'B', 8)
-			self.pdf.cell(20, 8, 'Extension', 1, 0, 'C')
-			self.pdf.cell(25, 8, 'Source Lines', 1, 0, 'C')
-			self.pdf.cell(25, 8, 'Comment Lines', 1, 0, 'C')
-			self.pdf.cell(25, 8, 'Blank Lines', 1, 0, 'C')
-			self.pdf.cell(20, 8, 'Total', 1, 1, 'C')
+			self.pdf.set_font('helvetica', 'B', 8)
+			self.pdf.cell(20, 8, 'Extension', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 8, 'Source Lines', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 8, 'Comment Lines', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 8, 'Blank Lines', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(20, 8, 'Total', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 			
 			# Table data
-			self.pdf.set_font('Arial', '', 7)
+			self.pdf.set_font('helvetica', '', 7)
 			sorted_sloc = sorted(sloc_data.items(), 
 								key=lambda x: x[1]['total'], reverse=True)[:15]
 			
@@ -3791,36 +3792,36 @@ class PDFReportCreator(ReportCreator):
 				comment_pct = (100.0 * sloc_info['comments'] / sloc_info['total']) if sloc_info['total'] else 0.0
 				blank_pct = (100.0 * sloc_info['blank'] / sloc_info['total']) if sloc_info['total'] else 0.0
 				
-				self.pdf.cell(20, 5, display_ext[:8], 1, 0, 'L')
-				self.pdf.cell(25, 5, f"{sloc_info['source']} ({source_pct:.1f}%)", 1, 0, 'C')
-				self.pdf.cell(25, 5, f"{sloc_info['comments']} ({comment_pct:.1f}%)", 1, 0, 'C')
-				self.pdf.cell(25, 5, f"{sloc_info['blank']} ({blank_pct:.1f}%)", 1, 0, 'C')
-				self.pdf.cell(20, 5, str(sloc_info['total']), 1, 1, 'C')
+				self.pdf.cell(20, 5, display_ext[:8], 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+				self.pdf.cell(25, 5, f"{sloc_info['source']} ({source_pct:.1f}%)", 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(25, 5, f"{sloc_info['comments']} ({comment_pct:.1f}%)", 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(25, 5, f"{sloc_info['blank']} ({blank_pct:.1f}%)", 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(20, 5, str(sloc_info['total']), 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 		
 		# Add new file statistics tables
 		try:
 			# Largest Files
 			largest_files = data.getLargestFiles(10)
 			if largest_files:
-				self.pdf.set_font('Arial', 'B', 14)
-				self.pdf.cell(0, 10, 'Largest Files', 0, 1, 'L')
+				self.pdf.set_font('helvetica', 'B', 14)
+				self.pdf.cell(0, 10, 'Largest Files', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 				
 				# Table header
-				self.pdf.set_font('Arial', 'B', 9)
-				self.pdf.cell(80, 8, 'File', 1, 0, 'C')
-				self.pdf.cell(30, 8, 'Size (bytes)', 1, 0, 'C')
-				self.pdf.cell(30, 8, 'Size (KB)', 1, 1, 'C')
+				self.pdf.set_font('helvetica', 'B', 9)
+				self.pdf.cell(80, 8, 'File', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(30, 8, 'Size (bytes)', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(30, 8, 'Size (KB)', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 				
 				# Table data
-				self.pdf.set_font('Arial', '', 8)
+				self.pdf.set_font('helvetica', '', 8)
 				for filepath, size in largest_files:
 					size_kb = size / 1024.0
 					display_path = filepath[:40] + '...' if len(filepath) > 40 else filepath
-					self.pdf.cell(80, 6, display_path, 1, 0, 'L')
-					self.pdf.cell(30, 6, str(size), 1, 0, 'C')
-					self.pdf.cell(30, 6, f"{size_kb:.1f}", 1, 1, 'C')
+					self.pdf.cell(80, 6, display_path, 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+					self.pdf.cell(30, 6, str(size), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+					self.pdf.cell(30, 6, f"{size_kb:.1f}", 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		except (AttributeError, TypeError):
 			pass
 		
@@ -3828,43 +3829,43 @@ class PDFReportCreator(ReportCreator):
 			# Files with Most Revisions (Hotspots)
 			hotspot_files = data.getFilesWithMostRevisions(10)
 			if hotspot_files:
-				self.pdf.ln(10)
-				self.pdf.set_font('Arial', 'B', 14)
-				self.pdf.cell(0, 10, 'Files with Most Revisions (Hotspots)', 0, 1, 'L')
+				self.pdf.ln(h=10)
+				self.pdf.set_font('helvetica', 'B', 14)
+				self.pdf.cell(0, 10, 'Files with Most Revisions (Hotspots)', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 				
 				# Table header
-				self.pdf.set_font('Arial', 'B', 9)
-				self.pdf.cell(80, 8, 'File', 1, 0, 'C')
-				self.pdf.cell(30, 8, 'Revisions', 1, 0, 'C')
-				self.pdf.cell(30, 8, '% of Commits', 1, 1, 'C')
+				self.pdf.set_font('helvetica', 'B', 9)
+				self.pdf.cell(80, 8, 'File', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(30, 8, 'Revisions', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(30, 8, '% of Commits', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 				
 				# Table data
-				self.pdf.set_font('Arial', '', 8)
+				self.pdf.set_font('helvetica', '', 8)
 				total_commits = data.getTotalCommits()
 				for filepath, revisions in hotspot_files:
 					revision_pct = (100.0 * revisions / total_commits) if total_commits else 0.0
 					display_path = filepath[:40] + '...' if len(filepath) > 40 else filepath
-					self.pdf.cell(80, 6, display_path, 1, 0, 'L')
-					self.pdf.cell(30, 6, str(revisions), 1, 0, 'C')
-					self.pdf.cell(30, 6, f"{revision_pct:.2f}%", 1, 1, 'C')
+					self.pdf.cell(80, 6, display_path, 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+					self.pdf.cell(30, 6, str(revisions), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+					self.pdf.cell(30, 6, f"{revision_pct:.2f}%", 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		except (AttributeError, TypeError):
 			pass
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 		
 		# Files by date chart
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Files by Date', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Files by Date', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('files_by_date.png', 180, 100)
 	
 	def _create_lines_page(self, data):
 		"""Create the lines of code statistics page with charts (mirrors lines.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '6. Lines of Code Statistics', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 20)
+		self.pdf.cell(0, 15, '6. Lines of Code Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Basic line stats
-		self.pdf.set_font('Arial', '', 12)
+		self.pdf.set_font('helvetica', '', 12)
 		stats = [
 			('Total lines', str(data.getTotalLOC())),
 			('Lines added', str(data.total_lines_added)),
@@ -3873,26 +3874,26 @@ class PDFReportCreator(ReportCreator):
 		]
 		
 		for label, value in stats:
-			self.pdf.cell(50, 8, f"{label}:", 0, 0, 'L')
-			self.pdf.cell(0, 8, str(value), 0, 1, 'L')
+			self.pdf.cell(50, 8, f"{label}:", 0, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+			self.pdf.cell(0, 8, str(value), 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 		
 		# Lines by year
 		if hasattr(data, 'commits_by_year') and data.commits_by_year:
-			self.pdf.set_font('Arial', 'B', 14)
-			self.pdf.cell(0, 10, 'Activity by Year', 0, 1, 'L')
+			self.pdf.set_font('helvetica', 'B', 14)
+			self.pdf.cell(0, 10, 'Activity by Year', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
 			# Table header
-			self.pdf.set_font('Arial', 'B', 10)
-			self.pdf.cell(25, 8, 'Year', 1, 0, 'C')
-			self.pdf.cell(30, 8, 'Commits', 1, 0, 'C')
-			self.pdf.cell(30, 8, '% of Total', 1, 0, 'C')
-			self.pdf.cell(35, 8, 'Lines Added', 1, 0, 'C')
-			self.pdf.cell(35, 8, 'Lines Removed', 1, 1, 'C')
+			self.pdf.set_font('helvetica', 'B', 10)
+			self.pdf.cell(25, 8, 'Year', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(30, 8, 'Commits', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(30, 8, '% of Total', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(35, 8, 'Lines Added', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(35, 8, 'Lines Removed', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 			
 			# Table data
-			self.pdf.set_font('Arial', '', 9)
+			self.pdf.set_font('helvetica', '', 9)
 			total_commits = data.getTotalCommits()
 			
 			for yy in sorted(data.commits_by_year.keys(), reverse=True):
@@ -3901,29 +3902,29 @@ class PDFReportCreator(ReportCreator):
 				lines_added = data.lines_added_by_year.get(yy, 0) if hasattr(data, 'lines_added_by_year') else 0
 				lines_removed = data.lines_removed_by_year.get(yy, 0) if hasattr(data, 'lines_removed_by_year') else 0
 				
-				self.pdf.cell(25, 6, str(yy), 1, 0, 'C')
-				self.pdf.cell(30, 6, str(commits), 1, 0, 'C')
-				self.pdf.cell(30, 6, f"{percent:.1f}%", 1, 0, 'C')
-				self.pdf.cell(35, 6, str(lines_added), 1, 0, 'C')
-				self.pdf.cell(35, 6, str(lines_removed), 1, 1, 'C')
+				self.pdf.cell(25, 6, str(yy), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(30, 6, str(commits), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(30, 6, f"{percent:.1f}%", 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(35, 6, str(lines_added), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(35, 6, str(lines_removed), 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 		
 		# Lines of code chart
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Lines of Code Over Time', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Lines of Code Over Time', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('lines_of_code.png', 180, 100)
 	
 	def _create_tags_page(self, data):
 		"""Create the tags statistics page (mirrors tags.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '7. Tags Statistics', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 20)
+		self.pdf.cell(0, 15, '7. Tags Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('Arial', '', 12)
+		self.pdf.set_font('helvetica', '', 12)
 		
 		if not hasattr(data, 'tags') or not data.tags:
-			self.pdf.cell(0, 10, 'No tags found in repository.', 0, 1, 'L')
+			self.pdf.cell(0, 10, 'No tags found in repository.', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			return
 		
 		# Basic tag stats
@@ -3936,44 +3937,44 @@ class PDFReportCreator(ReportCreator):
 		]
 		
 		for label, value in stats:
-			self.pdf.cell(50, 8, f"{label}:", 0, 0, 'L')
-			self.pdf.cell(0, 8, str(value), 0, 1, 'L')
+			self.pdf.cell(50, 8, f"{label}:", 0, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+			self.pdf.cell(0, 8, str(value), 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 		
 		# Tags table
 		if hasattr(data, 'tags') and data.tags:
-			self.pdf.set_font('Arial', 'B', 12)
-			self.pdf.cell(0, 10, 'List of Tags', 0, 1, 'L')
+			self.pdf.set_font('helvetica', 'B', 12)
+			self.pdf.cell(0, 10, 'List of Tags', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
 			# Table header
-			self.pdf.set_font('Arial', 'B', 10)
-			self.pdf.cell(40, 8, 'Tag', 1, 0, 'C')
-			self.pdf.cell(30, 8, 'Date', 1, 0, 'C')
-			self.pdf.cell(30, 8, 'Commits', 1, 0, 'C')
-			self.pdf.cell(50, 8, 'Author', 1, 1, 'C')
+			self.pdf.set_font('helvetica', 'B', 10)
+			self.pdf.cell(40, 8, 'Tag', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(30, 8, 'Date', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(30, 8, 'Commits', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(50, 8, 'Author', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 			
 			# Table data
-			self.pdf.set_font('Arial', '', 9)
+			self.pdf.set_font('helvetica', '', 9)
 			tag_list = sorted(data.tags.items(), key=lambda x: x[1]['date'], reverse=True)
 			
 			for tag, tag_data in tag_list[:20]:  # Show top 20 tags
-				self.pdf.cell(40, 6, tag[:20], 1, 0, 'L')
-				self.pdf.cell(30, 6, tag_data.get('date', 'N/A')[:10], 1, 0, 'C')
-				self.pdf.cell(30, 6, str(tag_data.get('commits', 0)), 1, 0, 'C')
+				self.pdf.cell(40, 6, tag[:20], 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+				self.pdf.cell(30, 6, tag_data.get('date', 'N/A')[:10], 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+				self.pdf.cell(30, 6, str(tag_data.get('commits', 0)), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 				author = tag_data.get('author', 'N/A')[:25]
-				self.pdf.cell(50, 6, author, 1, 1, 'L')
+				self.pdf.cell(50, 6, author, 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Tags table
-		self.pdf.set_font('Arial', 'B', 14)
-		self.pdf.cell(0, 10, 'Recent Tags', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 14)
+		self.pdf.cell(0, 10, 'Recent Tags', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Table header
-		self.pdf.set_font('Arial', 'B', 10)
-		self.pdf.cell(40, 8, 'Tag Name', 1, 0, 'C')
-		self.pdf.cell(30, 8, 'Date', 1, 0, 'C')
-		self.pdf.cell(25, 8, 'Commits', 1, 0, 'C')
-		self.pdf.cell(80, 8, 'Top Authors', 1, 1, 'C')
+		self.pdf.set_font('helvetica', 'B', 10)
+		self.pdf.cell(40, 8, 'Tag Name', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(30, 8, 'Date', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(25, 8, 'Commits', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(80, 8, 'Top Authors', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
 		# Sort tags by date (most recent first)
 		tags_sorted_by_date_desc = list(map(lambda el : el[1], 
@@ -3981,7 +3982,7 @@ class PDFReportCreator(ReportCreator):
 														  data.tags.items())))))
 		
 		# Show up to 20 most recent tags
-		self.pdf.set_font('Arial', '', 8)
+		self.pdf.set_font('helvetica', '', 8)
 		for tag in tags_sorted_by_date_desc[:20]:
 			tag_info = data.tags[tag]
 			
@@ -3997,21 +3998,21 @@ class PDFReportCreator(ReportCreator):
 			display_tag = tag[:18] + "..." if len(tag) > 21 else tag
 			display_authors = author_list[:35] + "..." if len(author_list) > 38 else author_list
 			
-			self.pdf.cell(40, 6, display_tag, 1, 0, 'L')
-			self.pdf.cell(30, 6, tag_info['date'][:10], 1, 0, 'C')
-			self.pdf.cell(25, 6, str(tag_info['commits']), 1, 0, 'C')
-			self.pdf.cell(80, 6, display_authors, 1, 1, 'L')
+			self.pdf.cell(40, 6, display_tag, 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+			self.pdf.cell(30, 6, tag_info['date'][:10], 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 6, str(tag_info['commits']), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(80, 6, display_authors, 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 
 	def _create_branches_page(self, data):
 		"""Create the branches statistics page (mirrors branches.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('Arial', 'B', 20)
-		self.pdf.cell(0, 15, '8. Branches Statistics', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 20)
+		self.pdf.cell(0, 15, '8. Branches Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('Arial', '', 12)
+		self.pdf.set_font('helvetica', '', 12)
 		
 		if not hasattr(data, 'branches') or not data.branches:
-			self.pdf.cell(0, 10, 'No branches found in repository.', 0, 1, 'L')
+			self.pdf.cell(0, 10, 'No branches found in repository.', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			return
 		
 		# Basic branch stats
@@ -4027,27 +4028,27 @@ class PDFReportCreator(ReportCreator):
 		]
 		
 		for label, value in stats:
-			self.pdf.cell(50, 8, f"{label}:", 0, 0, 'L')
-			self.pdf.cell(0, 8, str(value), 0, 1, 'L')
+			self.pdf.cell(50, 8, f"{label}:", 0, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+			self.pdf.cell(0, 8, str(value), 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.ln(10)
+		self.pdf.ln(h=10)
 		
 		# Branches summary table
-		self.pdf.set_font('Arial', 'B', 12)
-		self.pdf.cell(0, 10, 'All Branches', 0, 1, 'L')
+		self.pdf.set_font('helvetica', 'B', 12)
+		self.pdf.cell(0, 10, 'All Branches', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Table header
-		self.pdf.set_font('Arial', 'B', 9)
-		self.pdf.cell(35, 8, 'Branch Name', 1, 0, 'C')
-		self.pdf.cell(20, 8, 'Status', 1, 0, 'C')
-		self.pdf.cell(20, 8, 'Commits', 1, 0, 'C')
-		self.pdf.cell(25, 8, 'Lines Added', 1, 0, 'C')
-		self.pdf.cell(25, 8, 'Lines Removed', 1, 0, 'C')
-		self.pdf.cell(20, 8, 'Authors', 1, 0, 'C')
-		self.pdf.cell(45, 8, 'First Author', 1, 1, 'C')
+		self.pdf.set_font('helvetica', 'B', 9)
+		self.pdf.cell(35, 8, 'Branch Name', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(20, 8, 'Status', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(20, 8, 'Commits', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(25, 8, 'Lines Added', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(25, 8, 'Lines Removed', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(20, 8, 'Authors', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+		self.pdf.cell(45, 8, 'First Author', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
 		# Table data - sort by commits descending
-		self.pdf.set_font('Arial', '', 8)
+		self.pdf.set_font('helvetica', '', 8)
 		branches_sorted = sorted(data.branches.items(), 
 								key=lambda x: x[1].get('commits', 0), reverse=True)
 		
@@ -4072,31 +4073,31 @@ class PDFReportCreator(ReportCreator):
 			# Truncate branch name if too long
 			display_branch = branch_name[:18] + "..." if len(branch_name) > 21 else branch_name
 			
-			self.pdf.cell(35, 6, display_branch, 1, 0, 'L')
-			self.pdf.cell(20, 6, status, 1, 0, 'C')
-			self.pdf.cell(20, 6, str(commits), 1, 0, 'C')
-			self.pdf.cell(25, 6, str(lines_added), 1, 0, 'C')
-			self.pdf.cell(25, 6, str(lines_removed), 1, 0, 'C')
-			self.pdf.cell(20, 6, str(authors_count), 1, 0, 'C')
-			self.pdf.cell(45, 6, first_author, 1, 1, 'L')
+			self.pdf.cell(35, 6, display_branch, 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L')
+			self.pdf.cell(20, 6, status, 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(20, 6, str(commits), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 6, str(lines_added), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(25, 6, str(lines_removed), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(20, 6, str(authors_count), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
+			self.pdf.cell(45, 6, first_author, 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Unmerged branches detail section
 		if total_unmerged > 0:
-			self.pdf.ln(10)
-			self.pdf.set_font('Arial', 'B', 14)
-			self.pdf.cell(0, 10, f'Unmerged Branches Details ({total_unmerged})', 0, 1, 'L')
+			self.pdf.ln(h=10)
+			self.pdf.set_font('helvetica', 'B', 14)
+			self.pdf.cell(0, 10, f'Unmerged Branches Details ({total_unmerged})', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
-			self.pdf.set_font('Arial', '', 10)
+			self.pdf.set_font('helvetica', '', 10)
 			for branch_name in unmerged_branches:
 				if branch_name in data.branches:
 					branch_data = data.branches[branch_name]
 					
-					self.pdf.set_font('Arial', 'B', 10)
-					self.pdf.cell(0, 8, f"Branch: {branch_name}", 0, 1, 'L')
+					self.pdf.set_font('helvetica', 'B', 10)
+					self.pdf.cell(0, 8, f"Branch: {branch_name}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 					
-					self.pdf.set_font('Arial', '', 9)
-					self.pdf.cell(20, 6, f"  Commits: {branch_data.get('commits', 0)}", 0, 1, 'L')
-					self.pdf.cell(20, 6, f"  Lines: +{branch_data.get('lines_added', 0)} -{branch_data.get('lines_removed', 0)}", 0, 1, 'L')
+					self.pdf.set_font('helvetica', '', 9)
+					self.pdf.cell(20, 6, f"  Commits: {branch_data.get('commits', 0)}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
+					self.pdf.cell(20, 6, f"  Lines: +{branch_data.get('lines_added', 0)} -{branch_data.get('lines_removed', 0)}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 					
 					# Show authors
 					authors = branch_data.get('authors', {})
@@ -4105,20 +4106,53 @@ class PDFReportCreator(ReportCreator):
 						author_str = ', '.join([f"{author}({commits})" for author, commits in author_list[:3]])
 						if len(author_list) > 3:
 							author_str += f" and {len(author_list) - 3} more"
-						self.pdf.cell(20, 6, f"  Authors: {author_str}", 0, 1, 'L')
+						self.pdf.cell(20, 6, f"  Authors: {author_str}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 					
-					self.pdf.ln(2)
+					self.pdf.ln(h=2)
 		
 		
 		
+def is_git_repository(path):
+	"""Check if a directory is a valid git repository."""
+	if not os.path.exists(path) or not os.path.isdir(path):
+		return False
+	git_dir = os.path.join(path, '.git')
+	return os.path.exists(git_dir)
+
+def discover_repositories(scan_path):
+	"""Discover all git repositories in a directory.
+	
+	Returns a list of tuples: (repo_name, repo_path)
+	where repo_name matches the regex pattern and repo_path is the full path.
+	"""
+	repositories = []
+	if not os.path.exists(scan_path) or not os.path.isdir(scan_path):
+		return repositories
+	
+	try:
+		for item in os.listdir(scan_path):
+			item_path = os.path.join(scan_path, item)
+			if os.path.isdir(item_path) and is_git_repository(item_path):
+				# Use directory name as repository name
+				repo_name = item
+				repositories.append((repo_name, item_path))
+				if conf['verbose']:
+					print(f'  Found repository: {repo_name} at {item_path}')
+	except (PermissionError, OSError) as e:
+		print(f'Warning: Could not scan directory {scan_path}: {e}')
+	
+	return repositories
+
 def usage():
 	print("""
 Usage: gitstats [options] <gitpath..> <outputpath>
+       gitstats [options] --multi-repo <scan-folder> <outputpath>
 
 Options:
 -c key=value     Override configuration value
 --debug          Enable debug output
 --verbose        Enable verbose output
+--multi-repo     Scan folder for multiple repositories and generate reports for each
 -h, --help       Show this help message
 
 Note: GitStats always generates both HTML and PDF reports.
@@ -4126,7 +4160,13 @@ Note: GitStats always generates both HTML and PDF reports.
 Examples:
   gitstats repo output                    # Generates both HTML and PDF reports
   gitstats --verbose repo output          # With verbose output
+  gitstats --multi-repo /path/to/repos output  # Generate reports for all repos in folder
   gitstats --debug -c max_authors=50 repo output
+
+With --multi-repo mode:
+- Scans the specified folder for git repositories
+- Creates a report for each repository in a subfolder named <reponame>_report
+- Only processes directories that are valid git repositories
 
 Default config values:
 %s
@@ -4137,7 +4177,8 @@ Please see the manual page for more details.
 
 class GitStats:
 	def run(self, args_orig):
-		optlist, args = getopt.getopt(args_orig, 'hc:', ["help", "debug", "verbose"])
+		multi_repo_mode = False
+		optlist, args = getopt.getopt(args_orig, 'hc:', ["help", "debug", "verbose", "multi-repo"])
 		for o,v in optlist:
 			if o == '-c':
 				if '=' not in v:
@@ -4167,14 +4208,133 @@ class GitStats:
 				conf['verbose'] = True  # Debug implies verbose
 			elif o == '--verbose':
 				conf['verbose'] = True
+			elif o == '--multi-repo':
+				multi_repo_mode = True
 			elif o in ('-h', '--help'):
 				usage()
 				sys.exit()
 
-		if len(args) < 2:
-			usage()
-			sys.exit(0)
+		if multi_repo_mode:
+			if len(args) != 2:
+				print('FATAL: --multi-repo requires exactly two arguments: <scan-folder> <outputpath>')
+				usage()
+				sys.exit(1)
+			
+			scan_folder = os.path.abspath(args[0])
+			outputpath = os.path.abspath(args[1])
+			
+			# Validate scan folder
+			if not os.path.exists(scan_folder):
+				print(f'FATAL: Scan folder does not exist: {scan_folder}')
+				sys.exit(1)
+			if not os.path.isdir(scan_folder):
+				print(f'FATAL: Scan folder is not a directory: {scan_folder}')
+				sys.exit(1)
+			
+			# Discover repositories
+			print(f'Scanning folder for git repositories: {scan_folder}')
+			repositories = discover_repositories(scan_folder)
+			
+			if not repositories:
+				print(f'No git repositories found in: {scan_folder}')
+				sys.exit(0)
+			
+			print(f'Found {len(repositories)} git repositories:')
+			for repo_name, repo_path in repositories:
+				print(f'  - {repo_name}')
+			
+			# Generate reports for each repository
+			self.run_multi_repo(repositories, outputpath)
+		else:
+			# Original single/multiple repository mode
+			if len(args) < 2:
+				usage()
+				sys.exit(0)
+			
+			self.run_single_mode(args)
+	
+	def run_multi_repo(self, repositories, base_outputpath):
+		"""Generate reports for multiple repositories."""
+		rundir = os.getcwd()
+		
+		# Validate and create base output directory
+		try:
+			os.makedirs(base_outputpath, exist_ok=True)
+		except PermissionError:
+			print(f'FATAL: Permission denied creating output directory: {base_outputpath}')
+			sys.exit(1)
+		except OSError as e:
+			print(f'FATAL: Error creating output directory {base_outputpath}: {e}')
+			sys.exit(1)
+		
+		if not os.path.isdir(base_outputpath):
+			print('FATAL: Output path is not a directory or does not exist')
+			sys.exit(1)
+		
+		# Check write permissions
+		if not os.access(base_outputpath, os.W_OK):
+			print(f'FATAL: No write permission for output directory: {base_outputpath}')
+			sys.exit(1)
 
+		if not getgnuplotversion():
+			print('gnuplot not found')
+			sys.exit(1)
+
+		if conf['verbose']:
+			print('Configuration:')
+			for key, value in conf.items():
+				print(f'  {key}: {value}')
+			print()
+
+		print(f'Base output path: {base_outputpath}')
+		
+		successful_reports = 0
+		failed_reports = []
+		
+		for repo_name, repo_path in repositories:
+			print(f'\n{"="*60}')
+			print(f'Processing repository: {repo_name}')
+			print(f'Repository path: {repo_path}')
+			
+			# Create repository-specific output directory with pattern: repositoryname_report
+			repo_output_path = os.path.join(base_outputpath, f'{repo_name}_report')
+			
+			try:
+				os.makedirs(repo_output_path, exist_ok=True)
+				print(f'Report output path: {repo_output_path}')
+				
+				# Process this repository
+				self.process_single_repository(repo_path, repo_output_path, rundir)
+				successful_reports += 1
+				print(f'✓ Successfully generated report for {repo_name}')
+				
+			except Exception as e:
+				failed_reports.append((repo_name, str(e)))
+				print(f'✗ Failed to generate report for {repo_name}: {e}')
+				if conf['debug']:
+					import traceback
+					traceback.print_exc()
+		
+		# Summary
+		print(f'\n{"="*60}')
+		print(f'Multi-repository report generation complete!')
+		print(f'Successfully processed: {successful_reports}/{len(repositories)} repositories')
+		
+		if failed_reports:
+			print(f'\nFailed repositories:')
+			for repo_name, error in failed_reports:
+				print(f'  - {repo_name}: {error}')
+		
+		if successful_reports > 0:
+			print(f'\nReports generated in: {base_outputpath}')
+			print('Repository reports:')
+			for repo_name, repo_path in repositories:
+				if (repo_name, f'Error processing {repo_name}') not in failed_reports:
+					report_path = os.path.join(base_outputpath, f'{repo_name}_report')
+					print(f'  - {repo_name}: {report_path}/index.html')
+	
+	def run_single_mode(self, args):
+		"""Original single/multiple repository mode."""
 		outputpath = os.path.abspath(args[-1])
 		rundir = os.getcwd()
 
@@ -4227,7 +4387,7 @@ class GitStats:
 		data = GitDataCollector()
 		data.loadCache(cachefile)
 
-		for gitpath in args[0:-1]:
+		for gitpath in git_paths:
 			print('Git path: %s' % gitpath)
 
 			prevdir = os.getcwd()
@@ -4267,6 +4427,40 @@ class GitStats:
 			pdf_filename = f"gitstats_{data.projectname.replace(' ', '_')}.pdf"
 			print('   PDF report: \'%s\'' % os.path.join(outputpath, pdf_filename).replace("'", "'\\''"))
 			print()
+	
+	def process_single_repository(self, repo_path, output_path, rundir):
+		"""Process a single repository and generate its report."""
+		cachefile = os.path.join(output_path, 'gitstats.cache')
+
+		data = GitDataCollector()
+		data.loadCache(cachefile)
+
+		print(f'  Collecting data from: {repo_path}')
+		
+		prevdir = os.getcwd()
+		os.chdir(repo_path)
+
+		data.collect(repo_path)
+		os.chdir(prevdir)
+
+		print('  Refining data...')
+		data.saveCache(cachefile)
+		data.refine()
+
+		os.chdir(rundir)
+
+		print('  Generating report...')
+		
+		# Always generate both HTML and PDF reports
+		print('  Creating HTML report...')
+		html_report = HTMLReportCreator()
+		html_report.create(data, output_path)
+		
+		print('  Creating PDF report...')
+		pdf_report = PDFReportCreator()
+		pdf_report.create(data, output_path)
+
+		print(f'  Report generated in: {output_path}')
 
 if __name__=='__main__':
 	try:
