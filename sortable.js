@@ -36,9 +36,9 @@ var thead = false;
 function sortables_init() {
 	// Find all tables with class sortable and make them sortable
 	if (!document.getElementsByTagName) return;
-	tbls = document.getElementsByTagName("table");
-	for (ti=0;ti<tbls.length;ti++) {
-		thisTbl = tbls[ti];
+	var tbls = document.getElementsByTagName("table");
+	for (var ti=0;ti<tbls.length;ti++) {
+		var thisTbl = tbls[ti];
 		if (((' '+thisTbl.className+' ').indexOf("sortable") != -1) && (thisTbl.id)) {
 			ts_makeSortable(thisTbl);
 		}
@@ -104,7 +104,7 @@ function ts_resortTable(lnk, clid) {
 	var itm = "";
 	var i = 1;
 	while (itm == "" && i < t.tBodies[0].rows.length) {
-		var itm = ts_getInnerText(t.tBodies[0].rows[i].cells[column]);
+		itm = ts_getInnerText(t.tBodies[0].rows[i].cells[column]);
 		itm = trim(itm);
 		if (itm.substr(0,4) == "<!--" || itm.length == 0) {
 			itm = "";
@@ -112,7 +112,7 @@ function ts_resortTable(lnk, clid) {
 		i++;
 	}
 	if (itm == "") return; 
-	sortfn = ts_sort_caseinsensitive;
+	var sortfn = ts_sort_caseinsensitive;
 	if (itm.match(/^\d\d[\/\.-][a-zA-Z][a-zA-Z][a-zA-Z][\/\.-]\d\d\d\d$/)) sortfn = ts_sort_date;
 	if (itm.match(/^\d\d[\/\.-]\d\d[\/\.-]\d\d\d{2}?$/)) sortfn = ts_sort_date;
 	if (itm.match(/^-?[£$€Û¢´]\d/)) sortfn = ts_sort_numeric;
@@ -121,25 +121,26 @@ function ts_resortTable(lnk, clid) {
 	SORT_COLUMN_INDEX = column;
 	var firstRow = new Array();
 	var newRows = new Array();
-	for (k=0;k<t.tBodies.length;k++) {
-		for (i=0;i<t.tBodies[k].rows[0].length;i++) { 
+	for (var k=0;k<t.tBodies.length;k++) {
+		for (var i=0;i<t.tBodies[k].rows[0].length;i++) { 
 			firstRow[i] = t.tBodies[k].rows[0][i]; 
 		}
 	}
-	for (k=0;k<t.tBodies.length;k++) {
+	for (var k=0;k<t.tBodies.length;k++) {
 		if (!thead) {
 			// Skip the first row
-			for (j=1;j<t.tBodies[k].rows.length;j++) { 
+			for (var j=1;j<t.tBodies[k].rows.length;j++) { 
 				newRows[j-1] = t.tBodies[k].rows[j];
 			}
 		} else {
 			// Do NOT skip the first row
-			for (j=0;j<t.tBodies[k].rows.length;j++) { 
+			for (var j=0;j<t.tBodies[k].rows.length;j++) { 
 				newRows[j] = t.tBodies[k].rows[j];
 			}
 		}
 	}
 	newRows.sort(sortfn);
+	var ARROW;
 	if (span.getAttribute("sortdir") == 'down') {
 			ARROW = '&nbsp;&nbsp;<img src="'+ image_path + image_down + '" alt="&darr;"/>';
 			newRows.reverse();
@@ -150,7 +151,7 @@ function ts_resortTable(lnk, clid) {
 	} 
     // We appendChild rows that already exist to the tbody, so it moves them rather than creating new ones
     // don't do sortbottom rows
-    for (i=0; i<newRows.length; i++) { 
+    for (var i=0; i<newRows.length; i++) { 
 		if (!newRows[i].className || (newRows[i].className && (newRows[i].className.indexOf('sortbottom') == -1))) {
 			t.tBodies[0].appendChild(newRows[i]);
 		}
@@ -185,24 +186,25 @@ function getParent(el, pTagName) {
 
 function sort_date(date) {	
 	// y2k notes: two digit years less than 50 are treated as 20XX, greater than 50 are treated as 19XX
-	dt = "00000000";
+	var dt = "00000000";
 	if (date.length == 11) {
-		mtstr = date.substr(3,3);
+		var mtstr = date.substr(3,3);
 		mtstr = mtstr.toLowerCase();
+		var mt;
 		switch(mtstr) {
-			case "jan": var mt = "01"; break;
-			case "feb": var mt = "02"; break;
-			case "mar": var mt = "03"; break;
-			case "apr": var mt = "04"; break;
-			case "may": var mt = "05"; break;
-			case "jun": var mt = "06"; break;
-			case "jul": var mt = "07"; break;
-			case "aug": var mt = "08"; break;
-			case "sep": var mt = "09"; break;
-			case "oct": var mt = "10"; break;
-			case "nov": var mt = "11"; break;
-			case "dec": var mt = "12"; break;
-			// default: var mt = "00";
+			case "jan": mt = "01"; break;
+			case "feb": mt = "02"; break;
+			case "mar": mt = "03"; break;
+			case "apr": mt = "04"; break;
+			case "may": mt = "05"; break;
+			case "jun": mt = "06"; break;
+			case "jul": mt = "07"; break;
+			case "aug": mt = "08"; break;
+			case "sep": mt = "09"; break;
+			case "oct": mt = "10"; break;
+			case "nov": mt = "11"; break;
+			case "dec": mt = "12"; break;
+			default: mt = "00"; break;
 		}
 		dt = date.substr(7,4)+mt+date.substr(0,2);
 		return dt;
@@ -215,7 +217,7 @@ function sort_date(date) {
 			return dt;
 		}
 	} else if (date.length == 8) {
-		yr = date.substr(6,2);
+		var yr = date.substr(6,2);
 		if (parseInt(yr) < 50) { 
 			yr = '20'+yr; 
 		} else { 
@@ -233,8 +235,8 @@ function sort_date(date) {
 }
 
 function ts_sort_date(a,b) {
-	dt1 = sort_date(ts_getInnerText(a.cells[SORT_COLUMN_INDEX]));
-	dt2 = sort_date(ts_getInnerText(b.cells[SORT_COLUMN_INDEX]));
+	var dt1 = sort_date(ts_getInnerText(a.cells[SORT_COLUMN_INDEX]));
+	var dt2 = sort_date(ts_getInnerText(b.cells[SORT_COLUMN_INDEX]));
 	
 	if (dt1==dt2) {
 		return 0;
@@ -252,15 +254,15 @@ function ts_sort_numeric(a,b) {
 	return compare_numeric(aa,bb);
 }
 function compare_numeric(a,b) {
-	var a = parseFloat(a);
-	a = (isNaN(a) ? 0 : a);
-	var b = parseFloat(b);
-	b = (isNaN(b) ? 0 : b);
-	return a - b;
+	var numA = parseFloat(a);
+	numA = (isNaN(numA) ? 0 : numA);
+	var numB = parseFloat(b);
+	numB = (isNaN(numB) ? 0 : numB);
+	return numA - numB;
 }
 function ts_sort_caseinsensitive(a,b) {
-	aa = ts_getInnerText(a.cells[SORT_COLUMN_INDEX]).toLowerCase();
-	bb = ts_getInnerText(b.cells[SORT_COLUMN_INDEX]).toLowerCase();
+	var aa = ts_getInnerText(a.cells[SORT_COLUMN_INDEX]).toLowerCase();
+	var bb = ts_getInnerText(b.cells[SORT_COLUMN_INDEX]).toLowerCase();
 	if (aa==bb) {
 		return 0;
 	}
@@ -270,8 +272,8 @@ function ts_sort_caseinsensitive(a,b) {
 	return 1;
 }
 function ts_sort_default(a,b) {
-	aa = ts_getInnerText(a.cells[SORT_COLUMN_INDEX]);
-	bb = ts_getInnerText(b.cells[SORT_COLUMN_INDEX]);
+	var aa = ts_getInnerText(a.cells[SORT_COLUMN_INDEX]);
+	var bb = ts_getInnerText(b.cells[SORT_COLUMN_INDEX]);
 	if (aa==bb) {
 		return 0;
 	}
