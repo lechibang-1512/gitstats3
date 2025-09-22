@@ -49,7 +49,16 @@ conf = {
 	'processes': 8,
 	'start_date': '',
 	'debug': False,
-	'verbose': False
+	'verbose': False,
+	# Multi-repo specific configuration
+	'multi_repo_recursive': False,
+	'multi_repo_max_depth': 3,
+	'multi_repo_include_patterns': None,
+	'multi_repo_exclude_patterns': None,
+	'multi_repo_parallel': False,
+	'multi_repo_max_workers': 4,
+	'multi_repo_timeout': 3600,  # 1 hour timeout per repository
+	'multi_repo_cleanup_on_error': True
 }
 
 def getpipeoutput(cmds, quiet = False):
@@ -3256,6 +3265,248 @@ class PDFReportCreator(ReportCreator):
 			'table_header': (52, 152, 219), # Light blue
 			'table_alt': (245, 245, 245)    # Light gray
 		}
+		# Unicode-compatible font selection
+		self.font_family = self._detect_unicode_font()
+	
+	def _detect_unicode_font(self):
+		"""Detect and return a Unicode-compatible font family that supports Chinese characters."""
+		# List of Unicode-compatible fonts in order of preference with their typical paths
+		unicode_fonts = [
+			# Liberation fonts - widely available and support Unicode
+			{
+				'name': 'LiberationSans',
+				'paths': [
+					'/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+					'/usr/share/fonts/TTF/LiberationSans-Regular.ttf',
+					'/System/Library/Fonts/Liberation Sans.ttf'
+				]
+			},
+			# Noto fonts - comprehensive Unicode support
+			{
+				'name': 'NotoSans',
+				'paths': [
+					'/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
+					'/usr/share/fonts/TTF/NotoSans-Regular.ttf',
+					'/System/Library/Fonts/Noto Sans.ttf'
+				]
+			},
+			# DejaVu fonts - good Unicode support
+			{
+				'name': 'DejaVuSans',
+				'paths': [
+					'/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+					'/usr/share/fonts/TTF/DejaVuSans.ttf',
+					'/System/Library/Fonts/DejaVu Sans.ttf'
+				]
+			},
+			# Droid fonts - Android's Unicode fonts
+			{
+				'name': 'DroidSansFallback',
+				'paths': [
+					'/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+					'/usr/share/fonts/TTF/DroidSansFallbackFull.ttf'
+				]
+			}
+		]
+		
+		# Try to find an available Unicode font
+		for font_info in unicode_fonts:
+			for font_path in font_info['paths']:
+				if os.path.exists(font_path):
+					try:
+						# Test if we can add this font
+						test_pdf = FPDF()
+						test_pdf.add_font(font_info['name'], '', font_path)
+						# If successful, return the font info
+						return {
+							'name': font_info['name'],
+							'path': font_path,
+							'loaded': False
+						}
+					except Exception as e:
+						if conf['debug']:
+							print(f"Debug: Could not load font {font_path}: {e}")
+						continue
+		
+		# If no Unicode font found, return None - will use fallback
+		if conf['verbose']:
+			print("Warning: No Unicode-compatible fonts found. Chinese characters may cause errors.")
+		return None
+	
+	def _load_unicode_font(self):
+		"""Load the detected Unicode font into the PDF."""
+		if self.font_family and not self.font_family.get('loaded', False):
+			try:
+				# Add the Unicode font to the PDF
+				self.pdf.add_font(self.font_family['name'], '', self.font_family['path'])
+				
+				# Add bold variant if available
+				bold_path = self.font_family['path'].replace('-Regular.ttf', '-Bold.ttf')
+				if os.path.exists(bold_path):
+					self.pdf.add_font(self.font_family['name'], 'B', bold_path)
+					if conf['debug']:
+						print(f"Debug: Loaded bold variant: {bold_path}")
+				else:
+					if conf['debug']:
+						print(f"Debug: Bold variant not found: {bold_path}")
+				
+				# Add italic variant if available  
+				italic_path = self.font_family['path'].replace('-Regular.ttf', '-Italic.ttf')
+				if os.path.exists(italic_path):
+					self.pdf.add_font(self.font_family['name'], 'I', italic_path)
+					if conf['debug']:
+						print(f"Debug: Loaded italic variant: {italic_path}")
+				
+				# Add bold-italic variant if available
+				bold_italic_path = self.font_family['path'].replace('-Regular.ttf', '-BoldItalic.ttf')
+				if os.path.exists(bold_italic_path):
+					self.pdf.add_font(self.font_family['name'], 'BI', bold_italic_path)
+					if conf['debug']:
+						print(f"Debug: Loaded bold-italic variant: {bold_italic_path}")
+				
+				self.font_family['loaded'] = True
+				
+				if conf['verbose']:
+					print(f"Loaded Unicode font: {self.font_family['name']} from {self.font_family['path']}")
+				
+				return True
+			except Exception as e:
+				if conf['verbose'] or conf['debug']:
+					print(f"Warning: Failed to load Unicode font {self.font_family}: {e}")
+				return False
+		return True
+	
+	def _set_font(self, style='', size=12):
+		"""Set font using the Unicode-compatible font family."""
+		# First try to use the Unicode font if available
+		if self.font_family:
+			if not self.font_family.get('loaded', False):
+				self._load_unicode_font()
+			
+			if self.font_family.get('loaded', False):
+				try:
+					self.pdf.set_font(self.font_family['name'], style, size)
+					return
+				except Exception as e:
+					if conf['debug']:
+						print(f"Debug: Unicode font failed, falling back: {e}")
+		
+		# Fallback to built-in fonts (may not support Unicode)
+		try:
+			# Try Arial first as it's more commonly available
+			self.pdf.set_font('Arial', style, size)
+		except Exception as e:
+			try:
+				# Fallback to Times
+				self.pdf.set_font('Times', style, size)
+			except Exception as e2:
+				try:
+					# Final fallback to helvetica (original problematic font)
+					self.pdf.set_font('helvetica', style, size)
+					if conf['verbose']:
+						print("Warning: Using helvetica font - Chinese characters may cause errors")
+				except Exception as e3:
+					# If all else fails, let the error propagate
+					raise e3
+	
+	def _sanitize_text_for_pdf(self, text):
+		"""Sanitize text to ensure it can be rendered in PDF, with fallback for unsupported characters."""
+		if not isinstance(text, str):
+			text = str(text)
+		
+		# If we have a Unicode font loaded, try to use the text as-is first
+		if self.font_family and self.font_family.get('loaded', False):
+			return text
+		
+		# For non-Unicode fonts, replace problematic characters
+		# Create a mapping of common Chinese characters to transliterations
+		chinese_transliterations = {
+			'罗': 'Luo',
+			'贾': 'Jia', 
+			'李': 'Li',
+			'王': 'Wang',
+			'张': 'Zhang',
+			'刘': 'Liu',
+			'陈': 'Chen',
+			'杨': 'Yang',
+			'赵': 'Zhao',
+			'黄': 'Huang',
+			'周': 'Zhou',
+			'吴': 'Wu',
+			'徐': 'Xu',
+			'孙': 'Sun',
+			'胡': 'Hu',
+			'朱': 'Zhu',
+			'高': 'Gao',
+			'林': 'Lin',
+			'何': 'He',
+			'郭': 'Guo',
+			'马': 'Ma',
+			'罗': 'Luo',
+			'梁': 'Liang',
+			'宋': 'Song',
+			'郑': 'Zheng',
+			'谢': 'Xie',
+			'韩': 'Han',
+			'唐': 'Tang',
+			'冯': 'Feng',
+			'于': 'Yu',
+			'董': 'Dong',
+			'萧': 'Xiao',
+			'程': 'Cheng',
+			'曹': 'Cao',
+			'袁': 'Yuan',
+			'邓': 'Deng',
+			'许': 'Xu',
+			'傅': 'Fu',
+			'沈': 'Shen',
+			'曾': 'Zeng',
+			'彭': 'Peng',
+			'吕': 'Lu',
+			'苏': 'Su',
+			'卢': 'Lu',
+			'蒋': 'Jiang',
+			'蔡': 'Cai',
+			'贾': 'Jia',
+			'丁': 'Ding',
+			'魏': 'Wei'
+		}
+		
+		# Replace Chinese characters with transliterations
+		for chinese_char, transliteration in chinese_transliterations.items():
+			text = text.replace(chinese_char, transliteration)
+		
+		# Remove any remaining non-ASCII characters that might cause issues
+		try:
+			# Try to encode as latin-1 (which is what helvetica supports)
+			text.encode('latin-1')
+			return text
+		except UnicodeEncodeError:
+			# If that fails, replace non-ASCII characters with '?'
+			return ''.join(c if ord(c) < 128 else '?' for c in text)
+	
+	def _safe_cell(self, w, h, txt='', border=0, new_x=XPos.RIGHT, new_y=YPos.TOP, align='L', fill=False):
+		"""Safely add a cell with text, handling Unicode errors gracefully."""
+		try:
+			# First try with the original text
+			self.pdf.cell(w, h, txt, border, new_x=new_x, new_y=new_y, align=align, fill=fill)
+		except Exception as e:
+			if "outside the range of characters supported" in str(e):
+				# Try with sanitized text
+				try:
+					sanitized_txt = self._sanitize_text_for_pdf(txt)
+					self.pdf.cell(w, h, sanitized_txt, border, new_x=new_x, new_y=new_y, align=align, fill=fill)
+					if conf['verbose'] and sanitized_txt != txt:
+						print(f"Sanitized text: '{txt}' -> '{sanitized_txt}'")
+				except Exception as e2:
+					# Final fallback: replace with placeholder
+					placeholder = f"[{len(txt)} chars]"
+					self.pdf.cell(w, h, placeholder, border, new_x=new_x, new_y=new_y, align=align, fill=fill)
+					if conf['verbose']:
+						print(f"Text rendering failed, used placeholder: '{txt}' -> '{placeholder}'")
+			else:
+				# Re-raise other types of errors
+				raise e
 	
 	def _set_color(self, color_type='text', fill=False):
 		"""Set text or fill color using predefined color scheme."""
@@ -3274,13 +3525,13 @@ class PDFReportCreator(ReportCreator):
 		# Set header color and font
 		self._set_color('header')
 		if level == 1:
-			self.pdf.set_font('helvetica', 'B', 20)
+			self._set_font('B', 20)
 			height = 15
 		elif level == 2:
-			self.pdf.set_font('helvetica', 'B', 16)
+			self._set_font('B', 16)
 			height = 12
 		else:
-			self.pdf.set_font('helvetica', 'B', 14)
+			self._set_font('B', 14)
 			height = 10
 		
 		# Add the header
@@ -3300,7 +3551,7 @@ class PDFReportCreator(ReportCreator):
 		# Set header styling
 		self._set_color('table_header')
 		self._set_color('table_header', fill=True)
-		self.pdf.set_font('helvetica', 'B', font_size)
+		self._set_font('B', font_size)
 		
 		# Create header cells
 		for i, (header, width) in enumerate(zip(headers, widths)):
@@ -3313,7 +3564,7 @@ class PDFReportCreator(ReportCreator):
 		
 		# Reset styling for table content
 		self._set_color('text')
-		self.pdf.set_font('helvetica', '', font_size - 1)
+		self._set_font('', font_size - 1)
 	
 	def _create_table_row(self, values, widths, alternate_row=False, font_size=8):
 		"""Create a table row with optional alternating background."""
@@ -3341,6 +3592,15 @@ class PDFReportCreator(ReportCreator):
 		# Initialize PDF document with fpdf2 features
 		self.pdf = FPDF()
 		self.pdf.set_auto_page_break(auto=True, margin=15)
+		
+		# Load Unicode font for Chinese character support
+		if self.font_family:
+			unicode_loaded = self._load_unicode_font()
+			if unicode_loaded and conf['verbose']:
+				print(f"✓ Unicode font loaded: {self.font_family['name']}")
+		else:
+			if conf['verbose']:
+				print("⚠ No Unicode font available - Chinese characters may cause errors")
 		
 		# Set metadata for better PDF properties
 		self.pdf.set_title(f"GitStats Report - {data.projectname}")
@@ -3418,11 +3678,11 @@ class PDFReportCreator(ReportCreator):
 	def _create_title_page(self, data):
 		"""Create the title page of the PDF report."""
 		self.pdf.add_page()
-		self.pdf.set_font('helvetica', 'B', 24)
+		self._set_font('B', 24)
 		self.pdf.cell(0, 20, f'GitStats Report - {data.projectname}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
 		self.pdf.ln(h=10)
-		self.pdf.set_font('helvetica', '', 12)
+		self._set_font('', 12)
 		format = '%Y-%m-%d %H:%M:%S'
 		
 		# Report generation info
@@ -3437,10 +3697,10 @@ class PDFReportCreator(ReportCreator):
 		
 		# Table of contents
 		self.pdf.ln(h=15)
-		self.pdf.set_font('helvetica', 'B', 16)
+		self._set_font('B', 16)
 		self.pdf.cell(0, 10, 'Table of Contents', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('helvetica', '', 12)
+		self._set_font('', 12)
 		sections = [
 			'1. General Statistics',
 			'2. Activity Statistics', 
@@ -3458,10 +3718,10 @@ class PDFReportCreator(ReportCreator):
 	def _create_general_page(self, data):
 		"""Create the general statistics page (mirrors index.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('helvetica', 'B', 20)
+		self._set_font('B', 20)
 		self.pdf.cell(0, 15, '1. General Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('helvetica', '', 12)
+		self._set_font('', 12)
 		
 		# Calculate basic stats
 		total_commits = data.getTotalCommits()
@@ -3497,26 +3757,26 @@ class PDFReportCreator(ReportCreator):
 	def _create_activity_page(self, data):
 		"""Create the activity statistics page with charts (mirrors activity.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('helvetica', 'B', 20)
+		self._set_font('B', 20)
 		self.pdf.cell(0, 15, '2. Activity Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Weekly activity section
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Weekly Activity', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
-		self.pdf.set_font('helvetica', '', 10)
+		self._set_font('', 10)
 		self.pdf.cell(0, 6, 'Last 32 weeks activity (see chart below)', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self.pdf.ln(h=5)
 		
 		# Hour of Day section
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Hour of Day', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('helvetica', '', 10)
+		self._set_font('', 10)
 		hour_of_day = data.getActivityByHourOfDay()
 		total_commits = data.getTotalCommits()
 		
 		# Create hour of day table
-		self.pdf.set_font('helvetica', 'B', 8)
+		self._set_font('B', 8)
 		self.pdf.cell(20, 6, 'Hour', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		for h in range(0, 24):
 			self.pdf.cell(7, 6, str(h), 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
@@ -3539,18 +3799,18 @@ class PDFReportCreator(ReportCreator):
 		self._add_chart_if_exists('hour_of_day.png', 180, 90)
 		
 		# Day of Week section
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Day of Week', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('helvetica', '', 10)
+		self._set_font('', 10)
 		day_of_week = data.getActivityByDayOfWeek()
 		
 		# Create day of week table
-		self.pdf.set_font('helvetica', 'B', 10)
+		self._set_font('B', 10)
 		self.pdf.cell(30, 8, 'Day', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		self.pdf.cell(30, 8, 'Total (%)', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
-		self.pdf.set_font('helvetica', '', 10)
+		self._set_font('', 10)
 		for d in range(0, 7):
 			day_name = WEEKDAYS[d]
 			commits = day_of_week.get(d, 0)
@@ -3563,14 +3823,14 @@ class PDFReportCreator(ReportCreator):
 		
 		# Month of Year section  
 		if hasattr(data, 'activity_by_month_of_year'):
-			self.pdf.set_font('helvetica', 'B', 14) 
+			self._set_font('B', 14) 
 			self.pdf.cell(0, 10, 'Month of Year', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
-			self.pdf.set_font('helvetica', 'B', 10)
+			self._set_font('B', 10)
 			self.pdf.cell(30, 8, 'Month', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 			self.pdf.cell(40, 8, 'Commits (%)', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 			
-			self.pdf.set_font('helvetica', '', 10)
+			self._set_font('', 10)
 			for mm in range(1, 13):
 				commits = data.activity_by_month_of_year.get(mm, 0)
 				percent = (100.0 * commits / total_commits) if total_commits else 0.0
@@ -3585,29 +3845,29 @@ class PDFReportCreator(ReportCreator):
 			self.pdf.add_page()
 		
 		# Commits by year/month chart
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Commits by Year/Month', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('commits_by_year_month.png', 180, 100)
 		
 		# Commits by year chart 
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Commits by Year', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('commits_by_year.png', 180, 100)
 	
 	def _create_authors_page(self, data):
 		"""Create the authors statistics page with charts (mirrors authors.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('helvetica', 'B', 20)
+		self._set_font('B', 20)
 		self.pdf.cell(0, 15, '3. Authors Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# List of Authors table
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'List of Authors', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		authors = data.getAuthors(conf['max_authors'])
 		
 		# Table header
-		self.pdf.set_font('helvetica', 'B', 8)
+		self._set_font('B', 8)
 		self.pdf.cell(35, 6, 'Author', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		self.pdf.cell(20, 6, 'Commits (%)', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		self.pdf.cell(15, 6, '+ lines', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
@@ -3618,7 +3878,7 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.cell(15, 6, 'Active days', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
 		# Table data
-		self.pdf.set_font('helvetica', '', 7)
+		self._set_font('', 7)
 		for author in authors[:20]:  # Top 20 authors
 			info = data.getAuthorInfo(author)
 			
@@ -3648,31 +3908,31 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.ln(h=10)
 		
 		# Lines of code by author chart
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Cumulated Added Lines of Code per Author', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('lines_of_code_by_author.png', 180, 110)
 		
 		# Commits per author chart
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Commits per Author', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('commits_by_author.png', 180, 110)
 		
 		# Commits by domains chart
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Commits by Domains', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('domains.png', 180, 100)
 	
 	def _create_team_analysis_page(self, data):
 		"""Create the team analysis page for comprehensive team evaluation (new feature)."""
 		self.pdf.add_page()
-		self.pdf.set_font('helvetica', 'B', 20)
+		self._set_font('B', 20)
 		self.pdf.cell(0, 15, '4. Team Analysis', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Team Overview
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Team Overview', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('helvetica', '', 12)
+		self._set_font('', 12)
 		total_authors = data.getTotalAuthors()
 		work_distribution = data.getTeamWorkDistribution()
 		
@@ -3692,16 +3952,16 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.ln(h=10)
 		
 		# Team Performance Rankings
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Team Performance Rankings', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Top Contributors
 		contrib_ranking = data.getAuthorsByContribution()
 		efficiency_ranking = data.getAuthorsByEfficiency()
 		
-		self.pdf.set_font('helvetica', 'B', 12)
+		self._set_font('B', 12)
 		self.pdf.cell(0, 8, 'Top 10 Contributors (by commit percentage):', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
-		self.pdf.set_font('helvetica', '', 10)
+		self._set_font('', 10)
 		
 		for i, (author, percentage) in enumerate(contrib_ranking[:10], 1):
 			display_author = author[:30] + "..." if len(author) > 33 else author
@@ -3710,14 +3970,14 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.ln(h=5)
 		
 		# Team Performance Table
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Detailed Performance Analysis', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		team_performance = data.getTeamPerformance()
 		commit_patterns = data.getCommitPatterns()
 		
 		# Table header
-		self.pdf.set_font('helvetica', 'B', 8)
+		self._set_font('B', 8)
 		self.pdf.cell(35, 6, 'Author', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		self.pdf.cell(20, 6, 'Commits', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		self.pdf.cell(20, 6, 'Contrib %', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
@@ -3727,7 +3987,7 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.cell(25, 6, 'Overall', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
 		# Table data - show top 15 performers
-		self.pdf.set_font('helvetica', '', 7)
+		self._set_font('', 7)
 		sorted_authors = sorted(team_performance.items(), key=lambda x: x[1].get('overall_score', 0), reverse=True)
 		
 		for author, perf in sorted_authors[:15]:
@@ -3754,10 +4014,10 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.ln(h=10)
 		
 		# Team Assessment Conclusion
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Team Assessment Conclusion', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('helvetica', '', 10)
+		self._set_font('', 10)
 		
 		# Generate team insights
 		top_contributor = contrib_ranking[0] if contrib_ranking else ("N/A", 0)
@@ -3802,14 +4062,14 @@ class PDFReportCreator(ReportCreator):
 	def _create_files_page(self, data):
 		"""Create the files statistics page with charts (mirrors files.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('helvetica', 'B', 20)
+		self._set_font('B', 20)
 		self.pdf.cell(0, 15, '5. Files Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Basic file stats
 		total_files = data.getTotalFiles()
 		total_loc = data.getTotalLOC()
 		
-		self.pdf.set_font('helvetica', '', 12)
+		self._set_font('', 12)
 		stats = [
 			('Total files', str(total_files)),
 			('Total lines', str(total_loc)),
@@ -3837,11 +4097,11 @@ class PDFReportCreator(ReportCreator):
 		
 		# File extensions
 		if hasattr(data, 'extensions') and data.extensions:
-			self.pdf.set_font('helvetica', 'B', 14)
+			self._set_font('B', 14)
 			self.pdf.cell(0, 10, 'File Extensions', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
 			# Table header
-			self.pdf.set_font('helvetica', 'B', 9)
+			self._set_font('B', 9)
 			self.pdf.cell(25, 8, 'Extension', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 			self.pdf.cell(20, 8, 'Files', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 			self.pdf.cell(20, 8, '% Files', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
@@ -3850,7 +4110,7 @@ class PDFReportCreator(ReportCreator):
 			self.pdf.cell(25, 8, 'Lines/File', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 			
 			# Table data - show top extensions
-			self.pdf.set_font('helvetica', '', 8)
+			self._set_font('', 8)
 			sorted_extensions = sorted(data.extensions.items(), 
 									 key=lambda x: x[1]['files'], reverse=True)[:15]
 			
@@ -3875,11 +4135,11 @@ class PDFReportCreator(ReportCreator):
 		# SLOC Breakdown by Extension
 		sloc_data = data.getSLOCByExtension()
 		if sloc_data:
-			self.pdf.set_font('helvetica', 'B', 14)
+			self._set_font('B', 14)
 			self.pdf.cell(0, 10, 'Source Lines of Code (SLOC) Breakdown', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
 			# Table header
-			self.pdf.set_font('helvetica', 'B', 8)
+			self._set_font('B', 8)
 			self.pdf.cell(20, 8, 'Extension', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 			self.pdf.cell(25, 8, 'Source Lines', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 			self.pdf.cell(25, 8, 'Comment Lines', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
@@ -3887,7 +4147,7 @@ class PDFReportCreator(ReportCreator):
 			self.pdf.cell(20, 8, 'Total', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 			
 			# Table data
-			self.pdf.set_font('helvetica', '', 7)
+			self._set_font('', 7)
 			sorted_sloc = sorted(sloc_data.items(), 
 								key=lambda x: x[1]['total'], reverse=True)[:15]
 			
@@ -3913,17 +4173,17 @@ class PDFReportCreator(ReportCreator):
 			# Largest Files
 			largest_files = data.getLargestFiles(10)
 			if largest_files:
-				self.pdf.set_font('helvetica', 'B', 14)
+				self._set_font('B', 14)
 				self.pdf.cell(0, 10, 'Largest Files', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 				
 				# Table header
-				self.pdf.set_font('helvetica', 'B', 9)
+				self._set_font('B', 9)
 				self.pdf.cell(80, 8, 'File', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 				self.pdf.cell(30, 8, 'Size (bytes)', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 				self.pdf.cell(30, 8, 'Size (KB)', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 				
 				# Table data
-				self.pdf.set_font('helvetica', '', 8)
+				self._set_font('', 8)
 				for filepath, size in largest_files:
 					size_kb = size / 1024.0
 					display_path = filepath[:40] + '...' if len(filepath) > 40 else filepath
@@ -3938,17 +4198,17 @@ class PDFReportCreator(ReportCreator):
 			hotspot_files = data.getFilesWithMostRevisions(10)
 			if hotspot_files:
 				self.pdf.ln(h=10)
-				self.pdf.set_font('helvetica', 'B', 14)
+				self._set_font('B', 14)
 				self.pdf.cell(0, 10, 'Files with Most Revisions (Hotspots)', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 				
 				# Table header
-				self.pdf.set_font('helvetica', 'B', 9)
+				self._set_font('B', 9)
 				self.pdf.cell(80, 8, 'File', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 				self.pdf.cell(30, 8, 'Revisions', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 				self.pdf.cell(30, 8, '% of Commits', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 				
 				# Table data
-				self.pdf.set_font('helvetica', '', 8)
+				self._set_font('', 8)
 				total_commits = data.getTotalCommits()
 				for filepath, revisions in hotspot_files:
 					revision_pct = (100.0 * revisions / total_commits) if total_commits else 0.0
@@ -3962,18 +4222,18 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.ln(h=10)
 		
 		# Files by date chart
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Files by Date', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('files_by_date.png', 180, 100)
 	
 	def _create_lines_page(self, data):
 		"""Create the lines of code statistics page with charts (mirrors lines.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('helvetica', 'B', 20)
+		self._set_font('B', 20)
 		self.pdf.cell(0, 15, '6. Lines of Code Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Basic line stats
-		self.pdf.set_font('helvetica', '', 12)
+		self._set_font('', 12)
 		stats = [
 			('Total lines', str(data.getTotalLOC())),
 			('Lines added', str(data.total_lines_added)),
@@ -3989,11 +4249,11 @@ class PDFReportCreator(ReportCreator):
 		
 		# Lines by year
 		if hasattr(data, 'commits_by_year') and data.commits_by_year:
-			self.pdf.set_font('helvetica', 'B', 14)
+			self._set_font('B', 14)
 			self.pdf.cell(0, 10, 'Activity by Year', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
 			# Table header
-			self.pdf.set_font('helvetica', 'B', 10)
+			self._set_font('B', 10)
 			self.pdf.cell(25, 8, 'Year', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 			self.pdf.cell(30, 8, 'Commits', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 			self.pdf.cell(30, 8, '% of Total', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
@@ -4001,7 +4261,7 @@ class PDFReportCreator(ReportCreator):
 			self.pdf.cell(35, 8, 'Lines Removed', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 			
 			# Table data
-			self.pdf.set_font('helvetica', '', 9)
+			self._set_font('', 9)
 			total_commits = data.getTotalCommits()
 			
 			for yy in sorted(data.commits_by_year.keys(), reverse=True):
@@ -4019,17 +4279,17 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.ln(h=10)
 		
 		# Lines of code chart
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Lines of Code Over Time', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		self._add_chart_if_exists('lines_of_code.png', 180, 100)
 	
 	def _create_tags_page(self, data):
 		"""Create the tags statistics page (mirrors tags.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('helvetica', 'B', 20)
+		self._set_font('B', 20)
 		self.pdf.cell(0, 15, '7. Tags Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('helvetica', '', 12)
+		self._set_font('', 12)
 		
 		if not hasattr(data, 'tags') or not data.tags:
 			self.pdf.cell(0, 10, 'No tags found in repository.', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
@@ -4052,18 +4312,18 @@ class PDFReportCreator(ReportCreator):
 		
 		# Tags table
 		if hasattr(data, 'tags') and data.tags:
-			self.pdf.set_font('helvetica', 'B', 12)
+			self._set_font('B', 12)
 			self.pdf.cell(0, 10, 'List of Tags', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
 			# Table header
-			self.pdf.set_font('helvetica', 'B', 10)
+			self._set_font('B', 10)
 			self.pdf.cell(40, 8, 'Tag', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 			self.pdf.cell(30, 8, 'Date', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 			self.pdf.cell(30, 8, 'Commits', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 			self.pdf.cell(50, 8, 'Author', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 			
 			# Table data
-			self.pdf.set_font('helvetica', '', 9)
+			self._set_font('', 9)
 			tag_list = sorted(data.tags.items(), key=lambda x: x[1]['date'], reverse=True)
 			
 			for tag, tag_data in tag_list[:20]:  # Show top 20 tags
@@ -4074,11 +4334,11 @@ class PDFReportCreator(ReportCreator):
 				self.pdf.cell(50, 6, author, 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Tags table
-		self.pdf.set_font('helvetica', 'B', 14)
+		self._set_font('B', 14)
 		self.pdf.cell(0, 10, 'Recent Tags', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Table header
-		self.pdf.set_font('helvetica', 'B', 10)
+		self._set_font('B', 10)
 		self.pdf.cell(40, 8, 'Tag Name', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		self.pdf.cell(30, 8, 'Date', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		self.pdf.cell(25, 8, 'Commits', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
@@ -4090,7 +4350,7 @@ class PDFReportCreator(ReportCreator):
 														  data.tags.items())))))
 		
 		# Show up to 20 most recent tags
-		self.pdf.set_font('helvetica', '', 8)
+		self._set_font('', 8)
 		for tag in tags_sorted_by_date_desc[:20]:
 			tag_info = data.tags[tag]
 			
@@ -4114,10 +4374,10 @@ class PDFReportCreator(ReportCreator):
 	def _create_branches_page(self, data):
 		"""Create the branches statistics page (mirrors branches.html)."""
 		self.pdf.add_page()
-		self.pdf.set_font('helvetica', 'B', 20)
+		self._set_font('B', 20)
 		self.pdf.cell(0, 15, '8. Branches Statistics', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
-		self.pdf.set_font('helvetica', '', 12)
+		self._set_font('', 12)
 		
 		if not hasattr(data, 'branches') or not data.branches:
 			self.pdf.cell(0, 10, 'No branches found in repository.', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
@@ -4142,11 +4402,11 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.ln(h=10)
 		
 		# Branches summary table
-		self.pdf.set_font('helvetica', 'B', 12)
+		self._set_font('B', 12)
 		self.pdf.cell(0, 10, 'All Branches', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 		
 		# Table header
-		self.pdf.set_font('helvetica', 'B', 9)
+		self._set_font('B', 9)
 		self.pdf.cell(35, 8, 'Branch Name', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		self.pdf.cell(20, 8, 'Status', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
 		self.pdf.cell(20, 8, 'Commits', 1, new_x=XPos.RIGHT, new_y=YPos.TOP, align='C')
@@ -4156,7 +4416,7 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.cell(45, 8, 'First Author', 1, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
 		
 		# Table data - sort by commits descending
-		self.pdf.set_font('helvetica', '', 8)
+		self._set_font('', 8)
 		branches_sorted = sorted(data.branches.items(), 
 								key=lambda x: x[1].get('commits', 0), reverse=True)
 		
@@ -4192,18 +4452,18 @@ class PDFReportCreator(ReportCreator):
 		# Unmerged branches detail section
 		if total_unmerged > 0:
 			self.pdf.ln(h=10)
-			self.pdf.set_font('helvetica', 'B', 14)
+			self._set_font('B', 14)
 			self.pdf.cell(0, 10, f'Unmerged Branches Details ({total_unmerged})', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 			
-			self.pdf.set_font('helvetica', '', 10)
+			self._set_font('', 10)
 			for branch_name in unmerged_branches:
 				if branch_name in data.branches:
 					branch_data = data.branches[branch_name]
 					
-					self.pdf.set_font('helvetica', 'B', 10)
+					self._set_font('B', 10)
 					self.pdf.cell(0, 8, f"Branch: {branch_name}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 					
-					self.pdf.set_font('helvetica', '', 9)
+					self._set_font('', 9)
 					self.pdf.cell(20, 6, f"  Commits: {branch_data.get('commits', 0)}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 					self.pdf.cell(20, 6, f"  Lines: +{branch_data.get('lines_added', 0)} -{branch_data.get('lines_removed', 0)}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='L')
 					
@@ -4221,33 +4481,260 @@ class PDFReportCreator(ReportCreator):
 		
 		
 def is_git_repository(path):
-	"""Check if a directory is a valid git repository."""
-	if not os.path.exists(path) or not os.path.isdir(path):
-		return False
-	git_dir = os.path.join(path, '.git')
-	return os.path.exists(git_dir)
-
-def discover_repositories(scan_path):
-	"""Discover all git repositories in a directory.
+	"""Check if a directory is a valid git repository.
 	
-	Returns a list of tuples: (repo_name, repo_path)
-	where repo_name matches the regex pattern and repo_path is the full path.
+	Handles regular repositories, bare repositories, and git worktrees.
+	Also validates that the repository is accessible and not corrupted.
+	"""
+	if not os.path.exists(path):
+		return False
+	
+	# Resolve symbolic links to get the real path
+	try:
+		real_path = os.path.realpath(path)
+		if not os.path.isdir(real_path):
+			return False
+	except (OSError, PermissionError):
+		return False
+	
+	# Check for regular git repository (.git directory)
+	git_dir = os.path.join(real_path, '.git')
+	if os.path.exists(git_dir):
+		# For regular repos, .git can be a directory or a file (worktree)
+		if os.path.isdir(git_dir):
+			# Regular repository - verify it's not corrupted
+			return _validate_git_directory(git_dir)
+		elif os.path.isfile(git_dir):
+			# Git worktree - read the gitdir path
+			try:
+				with open(git_dir, 'r') as f:
+					gitdir_line = f.read().strip()
+					if gitdir_line.startswith('gitdir: '):
+						gitdir_path = gitdir_line[8:]  # Remove 'gitdir: ' prefix
+						if not os.path.isabs(gitdir_path):
+							gitdir_path = os.path.join(real_path, gitdir_path)
+						return os.path.exists(gitdir_path) and _validate_git_directory(gitdir_path)
+			except (IOError, OSError):
+				return False
+	
+	# Check for bare repository (no .git directory, but has git objects)
+	if _is_bare_repository(real_path):
+		return True
+	
+	return False
+
+def _validate_git_directory(git_dir):
+	"""Validate that a .git directory contains the essential git structure."""
+	try:
+		# Check for essential git directories/files
+		essential_items = ['objects', 'refs', 'HEAD']
+		for item in essential_items:
+			item_path = os.path.join(git_dir, item)
+			if not os.path.exists(item_path):
+				return False
+		
+		# Verify we can run basic git commands in this directory
+		# This is the most reliable way to check if git can work with this repo
+		parent_dir = os.path.dirname(git_dir)
+		try:
+			# Try to get the git directory path - if this fails, the repo is corrupted
+			result = getpipeoutput([f'cd "{parent_dir}" && git rev-parse --git-dir'], quiet=True)
+			return result.strip() != ''
+		except:
+			return False
+			
+	except (OSError, PermissionError):
+		return False
+	
+	return True
+
+def _is_bare_repository(path):
+	"""Check if the directory is a bare git repository."""
+	try:
+		# Bare repositories have objects and refs directories directly
+		objects_dir = os.path.join(path, 'objects')
+		refs_dir = os.path.join(path, 'refs')
+		head_file = os.path.join(path, 'HEAD')
+		
+		if not (os.path.exists(objects_dir) and os.path.exists(refs_dir) and os.path.exists(head_file)):
+			return False
+		
+		# Additional check: try to run git command to confirm it's a bare repo
+		try:
+			result = getpipeoutput([f'cd "{path}" && git rev-parse --is-bare-repository'], quiet=True)
+			return result.strip().lower() == 'true'
+		except:
+			return False
+			
+	except (OSError, PermissionError):
+		return False
+	
+	return True
+
+def discover_repositories(scan_path, recursive=False, max_depth=3, include_patterns=None, exclude_patterns=None):
+	"""Discover all git repositories in a directory with advanced options.
+	
+	Args:
+		scan_path: Directory to scan for repositories
+		recursive: If True, scan subdirectories recursively
+		max_depth: Maximum depth for recursive scanning (default: 3)
+		include_patterns: List of glob patterns for directories to include
+		exclude_patterns: List of glob patterns for directories to exclude
+	
+	Returns:
+		List of tuples: (repo_name, repo_path, repo_type)
+		where repo_type is 'regular', 'bare', or 'worktree'
 	"""
 	repositories = []
-	if not os.path.exists(scan_path) or not os.path.isdir(scan_path):
+	
+	if not os.path.exists(scan_path):
+		print(f'Warning: Scan path does not exist: {scan_path}')
 		return repositories
 	
-	try:
-		for item in os.listdir(scan_path):
-			item_path = os.path.join(scan_path, item)
-			if os.path.isdir(item_path) and is_git_repository(item_path):
-				# Use directory name as repository name
-				repo_name = item
-				repositories.append((repo_name, item_path))
+	if not os.path.isdir(scan_path):
+		print(f'Warning: Scan path is not a directory: {scan_path}')
+		return repositories
+	
+	# Set default patterns if not provided
+	if exclude_patterns is None:
+		exclude_patterns = [
+			'.*',  # Hidden directories
+			'node_modules', 
+			'venv', 
+			'__pycache__',
+			'build',
+			'dist',
+			'target',  # Maven/Gradle build dirs
+			'bin',
+			'obj'      # .NET build dirs
+		]
+	
+	def _should_exclude_directory(dir_name, dir_path):
+		"""Check if directory should be excluded based on patterns."""
+		import fnmatch
+		
+		# Check exclude patterns
+		for pattern in exclude_patterns:
+			if fnmatch.fnmatch(dir_name, pattern):
+				return True
+		
+		# Check include patterns (if specified, directory must match at least one)
+		if include_patterns:
+			for pattern in include_patterns:
+				if fnmatch.fnmatch(dir_name, pattern):
+					return False
+			return True  # No include pattern matched
+		
+		return False
+	
+	def _determine_repo_type(repo_path):
+		"""Determine the type of git repository."""
+		git_dir = os.path.join(repo_path, '.git')
+		
+		if os.path.isdir(git_dir):
+			return 'regular'
+		elif os.path.isfile(git_dir):
+			return 'worktree'
+		elif _is_bare_repository(repo_path):
+			return 'bare'
+		else:
+			return 'unknown'
+	
+	def _scan_directory(current_path, current_depth=0):
+		"""Recursively scan directory for git repositories."""
+		if current_depth > max_depth:
+			return
+		
+		try:
+			# Get list of items, handle permission errors gracefully
+			try:
+				items = os.listdir(current_path)
+			except PermissionError:
 				if conf['verbose']:
-					print(f'  Found repository: {repo_name} at {item_path}')
-	except (PermissionError, OSError) as e:
-		print(f'Warning: Could not scan directory {scan_path}: {e}')
+					print(f'  Permission denied accessing: {current_path}')
+				return
+			except OSError as e:
+				if conf['verbose']:
+					print(f'  Error accessing {current_path}: {e}')
+				return
+			
+			# Check if current directory is a git repository
+			if is_git_repository(current_path):
+				repo_name = os.path.basename(current_path)
+				repo_type = _determine_repo_type(current_path)
+				repositories.append((repo_name, current_path, repo_type))
+				
+				if conf['verbose']:
+					print(f'  Found {repo_type} repository: {repo_name} at {current_path}')
+				
+				# Don't scan inside git repositories to avoid nested repos
+				return
+			
+			# If recursive scanning is enabled, scan subdirectories
+			if recursive:
+				for item in sorted(items):  # Sort for consistent ordering
+					item_path = os.path.join(current_path, item)
+					
+					# Skip if not a directory or if it's a symbolic link to avoid loops
+					if not os.path.isdir(item_path):
+						continue
+					
+					# Handle symbolic links carefully to avoid infinite loops
+					if os.path.islink(item_path):
+						try:
+							# Resolve the link and check if it points outside scan_path
+							real_item_path = os.path.realpath(item_path)
+							scan_real_path = os.path.realpath(scan_path)
+							
+							# Skip if symlink points outside the scan directory
+							if not real_item_path.startswith(scan_real_path):
+								if conf['debug']:
+									print(f'  Skipping symlink pointing outside scan path: {item_path}')
+								continue
+								
+							# Skip if we've already seen this real path (circular symlinks)
+							if real_item_path in seen_paths:
+								if conf['debug']:
+									print(f'  Skipping circular symlink: {item_path}')
+								continue
+							seen_paths.add(real_item_path)
+							
+						except (OSError, ValueError):
+							if conf['debug']:
+								print(f'  Skipping invalid symlink: {item_path}')
+							continue
+					
+					# Check exclusion patterns
+					if _should_exclude_directory(item, item_path):
+						if conf['debug']:
+							print(f'  Excluding directory: {item_path}')
+						continue
+					
+					# Recursively scan subdirectory
+					_scan_directory(item_path, current_depth + 1)
+			
+		except Exception as e:
+			if conf['verbose']:
+				print(f'  Error scanning {current_path}: {e}')
+	
+	# Keep track of seen paths to handle symbolic links
+	seen_paths = set()
+	seen_paths.add(os.path.realpath(scan_path))
+	
+	if conf['verbose']:
+		print(f'Scanning for repositories in: {scan_path}')
+		print(f'  Recursive: {recursive}')
+		print(f'  Max depth: {max_depth}')
+		if include_patterns:
+			print(f'  Include patterns: {include_patterns}')
+		if exclude_patterns:
+			print(f'  Exclude patterns: {exclude_patterns}')
+	
+	# Start scanning
+	_scan_directory(scan_path)
+	
+	if conf['verbose']:
+		print(f'Repository discovery complete. Found {len(repositories)} repositories.')
 	
 	return repositories
 
@@ -4270,14 +4757,30 @@ Examples:
   gitstats --verbose repo output          # With verbose output
   gitstats --multi-repo /path/to/repos output  # Generate reports for all repos in folder
   gitstats --debug -c max_authors=50 repo output
+  
+  # Multi-repo with configuration options:
+  gitstats -c multi_repo_recursive=True --multi-repo /path/to/repos output
+  gitstats -c multi_repo_max_depth=5 -c multi_repo_recursive=True --multi-repo /path/to/repos output
 
 With --multi-repo mode:
 - Scans the specified folder for git repositories
 - Creates a report for each repository in a subfolder named <reponame>_report
 - Only processes directories that are valid git repositories
+- Generates a summary report with links to all individual reports
+
+Multi-repo configuration options (use with -c key=value):
+  multi_repo_recursive=True/False       # Enable recursive directory scanning (default: False)
+  multi_repo_max_depth=N               # Maximum depth for recursive scanning (default: 3)
+  multi_repo_include_patterns=pat1,pat2 # Comma-separated glob patterns for directories to include
+  multi_repo_exclude_patterns=pat1,pat2 # Comma-separated glob patterns for directories to exclude
+  multi_repo_timeout=N                 # Timeout in seconds per repository (default: 3600)
+  multi_repo_cleanup_on_error=True/False # Clean up partial output on error (default: True)
 
 Default config values:
 %s
+
+Default multi-repo exclude patterns:
+  .* (hidden dirs), node_modules, venv, __pycache__, build, dist, target, bin, obj
 
 Please see the manual page for more details.
 """ % conf)
@@ -4298,14 +4801,17 @@ class GitStats:
 				
 				# Validate configuration values
 				try:
-					if isinstance(conf[key], int):
+					if isinstance(conf[key], bool):
+						conf[key] = value.lower() in ('true', '1', 'yes', 'on')
+					elif isinstance(conf[key], int):
 						new_value = int(value)
 						if key in ['max_authors', 'max_domains'] and new_value < 1:
-							print(f'FATAL: {key} must be a positive integer, got: {new_value}')
+							print(f'FATAL: {key} must be at least 1, got: {new_value}')
 							sys.exit(1)
 						conf[key] = new_value
-					elif isinstance(conf[key], bool):
-						conf[key] = value.lower() in ('true', '1', 'yes', 'on')
+					elif key.endswith('_patterns') and value:
+						# Handle comma-separated patterns
+						conf[key] = [pattern.strip() for pattern in value.split(',') if pattern.strip()]
 					else:
 						conf[key] = value
 				except ValueError as e:
@@ -4331,25 +4837,53 @@ class GitStats:
 			scan_folder = os.path.abspath(args[0])
 			outputpath = os.path.abspath(args[1])
 			
-			# Validate scan folder
+			# Enhanced validation of scan folder
 			if not os.path.exists(scan_folder):
 				print(f'FATAL: Scan folder does not exist: {scan_folder}')
 				sys.exit(1)
 			if not os.path.isdir(scan_folder):
 				print(f'FATAL: Scan folder is not a directory: {scan_folder}')
 				sys.exit(1)
+			if not os.access(scan_folder, os.R_OK):
+				print(f'FATAL: No read permission for scan folder: {scan_folder}')
+				sys.exit(1)
 			
-			# Discover repositories
+			# Check for additional multi-repo configuration options
+			recursive_scan = conf.get('multi_repo_recursive', False)
+			max_depth = conf.get('multi_repo_max_depth', 3)
+			include_patterns = conf.get('multi_repo_include_patterns', None)
+			exclude_patterns = conf.get('multi_repo_exclude_patterns', None)
+			
+			# Discover repositories with enhanced options
 			print(f'Scanning folder for git repositories: {scan_folder}')
-			repositories = discover_repositories(scan_folder)
+			if recursive_scan:
+				print(f'  Using recursive scanning (max depth: {max_depth})')
+			
+			try:
+				repositories = discover_repositories(
+					scan_folder, 
+					recursive=recursive_scan,
+					max_depth=max_depth,
+					include_patterns=include_patterns,
+					exclude_patterns=exclude_patterns
+				)
+			except Exception as e:
+				print(f'FATAL: Error during repository discovery: {e}')
+				if conf['debug']:
+					import traceback
+					traceback.print_exc()
+				sys.exit(1)
 			
 			if not repositories:
 				print(f'No git repositories found in: {scan_folder}')
+				if not recursive_scan:
+					print('Hint: Try using recursive scanning with --multi-repo-recursive option')
 				sys.exit(0)
 			
 			print(f'Found {len(repositories)} git repositories:')
-			for repo_name, repo_path in repositories:
-				print(f'  - {repo_name}')
+			for repo_name, repo_path, repo_type in repositories:
+				type_indicator = f' ({repo_type})' if repo_type != 'regular' else ''
+				print(f'  - {repo_name}{type_indicator}')
 			
 			# Generate reports for each repository
 			self.run_multi_repo(repositories, outputpath)
@@ -4362,7 +4896,7 @@ class GitStats:
 			self.run_single_mode(args)
 	
 	def run_multi_repo(self, repositories, base_outputpath):
-		"""Generate reports for multiple repositories."""
+		"""Generate reports for multiple repositories with enhanced error handling."""
 		rundir = os.getcwd()
 		
 		# Validate and create base output directory
@@ -4384,49 +4918,123 @@ class GitStats:
 			print(f'FATAL: No write permission for output directory: {base_outputpath}')
 			sys.exit(1)
 
-		if not getgnuplotversion():
-			print('gnuplot not found')
+		# Validate gnuplot availability
+		try:
+			gnuplot_version = getgnuplotversion()
+			if not gnuplot_version:
+				print('FATAL: gnuplot not found - required for generating charts')
+				sys.exit(1)
+			if conf['verbose']:
+				print(f'Using {gnuplot_version}')
+		except Exception as e:
+			print(f'FATAL: Error checking gnuplot: {e}')
 			sys.exit(1)
 
 		if conf['verbose']:
-			print('Configuration:')
+			print('Multi-repo Configuration:')
 			for key, value in conf.items():
-				print(f'  {key}: {value}')
+				if key.startswith('multi_repo') or key in ['verbose', 'debug', 'processes']:
+					print(f'  {key}: {value}')
 			print()
 
 		print(f'Base output path: {base_outputpath}')
 		
 		successful_reports = 0
 		failed_reports = []
+		skipped_repos = []
+		total_start_time = time.time()
 		
-		for repo_name, repo_path in repositories:
-			print(f'\n{"="*60}')
-			print(f'Processing repository: {repo_name}')
-			print(f'Repository path: {repo_path}')
+		# Pre-validate all repositories before processing
+		print('Pre-validating repositories...')
+		validated_repos = []
+		for repo_data in repositories:
+			if len(repo_data) == 3:
+				repo_name, repo_path, repo_type = repo_data
+			else:
+				# Handle old format for backward compatibility
+				repo_name, repo_path = repo_data[:2]
+				repo_type = 'regular'
 			
-			# Create repository-specific output directory with pattern: repositoryname_report
-			repo_output_path = os.path.join(base_outputpath, f'{repo_name}_report')
+			# Validate repository accessibility
+			if not self._validate_repository_access(repo_name, repo_path):
+				skipped_repos.append((repo_name, 'Repository validation failed'))
+				continue
+			
+			validated_repos.append((repo_name, repo_path, repo_type))
+		
+		if skipped_repos:
+			print(f'Skipping {len(skipped_repos)} invalid repositories:')
+			for repo_name, reason in skipped_repos:
+				print(f'  - {repo_name}: {reason}')
+		
+		if not validated_repos:
+			print('FATAL: No valid repositories to process')
+			sys.exit(1)
+		
+		print(f'Processing {len(validated_repos)} validated repositories...')
+		
+		for i, (repo_name, repo_path, repo_type) in enumerate(validated_repos, 1):
+			repo_start_time = time.time()
+			print(f'\n{"="*60}')
+			print(f'Processing repository {i}/{len(validated_repos)}: {repo_name}')
+			print(f'Repository path: {repo_path}')
+			print(f'Repository type: {repo_type}')
+			
+			# Create repository-specific output directory with safe naming
+			safe_repo_name = self._sanitize_filename(repo_name)
+			repo_output_path = os.path.join(base_outputpath, f'{safe_repo_name}_report')
 			
 			try:
+				# Create output directory
 				os.makedirs(repo_output_path, exist_ok=True)
+				if not os.access(repo_output_path, os.W_OK):
+					raise PermissionError(f'No write permission for {repo_output_path}')
+				
 				print(f'Report output path: {repo_output_path}')
 				
-				# Process this repository
-				self.process_single_repository(repo_path, repo_output_path, rundir)
-				successful_reports += 1
-				print(f'✓ Successfully generated report for {repo_name}')
+				# Process this repository with timeout protection
+				self._process_single_repository_safe(repo_path, repo_output_path, rundir, repo_name)
 				
+				repo_time = time.time() - repo_start_time
+				successful_reports += 1
+				print(f'✓ Successfully generated report for {repo_name} in {repo_time:.2f}s')
+				
+			except KeyboardInterrupt:
+				print(f'\n✗ Interrupted while processing {repo_name}')
+				failed_reports.append((repo_name, 'Processing interrupted by user'))
+				break
 			except Exception as e:
-				failed_reports.append((repo_name, str(e)))
-				print(f'✗ Failed to generate report for {repo_name}: {e}')
+				repo_time = time.time() - repo_start_time
+				error_msg = str(e)
+				failed_reports.append((repo_name, error_msg))
+				print(f'✗ Failed to generate report for {repo_name} after {repo_time:.2f}s: {error_msg}')
 				if conf['debug']:
 					import traceback
 					traceback.print_exc()
+				
+				# Try to clean up partial output
+				try:
+					if os.path.exists(repo_output_path):
+						import shutil
+						shutil.rmtree(repo_output_path)
+						if conf['verbose']:
+							print(f'  Cleaned up partial output directory: {repo_output_path}')
+				except Exception as cleanup_error:
+					if conf['debug']:
+						print(f'  Warning: Could not clean up {repo_output_path}: {cleanup_error}')
 		
-		# Summary
+		# Generate summary report
+		total_time = time.time() - total_start_time
+		self._generate_multi_repo_summary(base_outputpath, validated_repos, successful_reports, 
+										 failed_reports, skipped_repos, total_time)
+		
+		# Final summary
 		print(f'\n{"="*60}')
-		print(f'Multi-repository report generation complete!')
-		print(f'Successfully processed: {successful_reports}/{len(repositories)} repositories')
+		print(f'Multi-repository report generation complete in {total_time:.2f}s!')
+		print(f'Successfully processed: {successful_reports}/{len(validated_repos)} repositories')
+		
+		if skipped_repos:
+			print(f'Skipped repositories: {len(skipped_repos)}')
 		
 		if failed_reports:
 			print(f'\nFailed repositories:')
@@ -4436,10 +5044,168 @@ class GitStats:
 		if successful_reports > 0:
 			print(f'\nReports generated in: {base_outputpath}')
 			print('Repository reports:')
-			for repo_name, repo_path in repositories:
-				if (repo_name, f'Error processing {repo_name}') not in failed_reports:
-					report_path = os.path.join(base_outputpath, f'{repo_name}_report')
+			for repo_name, repo_path, repo_type in validated_repos:
+				safe_repo_name = self._sanitize_filename(repo_name)
+				if not any(repo_name == failed[0] for failed in failed_reports):
+					report_path = os.path.join(base_outputpath, f'{safe_repo_name}_report')
 					print(f'  - {repo_name}: {report_path}/index.html')
+			
+			summary_path = os.path.join(base_outputpath, 'multi_repo_summary.html')
+			if os.path.exists(summary_path):
+				print(f'\nSummary report: {summary_path}')
+	
+	def _validate_repository_access(self, repo_name, repo_path):
+		"""Validate that a repository is accessible and can be processed."""
+		try:
+			# Check basic path validity
+			if not os.path.exists(repo_path):
+				if conf['verbose']:
+					print(f'  Repository path does not exist: {repo_path}')
+				return False
+			
+			if not os.path.isdir(repo_path):
+				if conf['verbose']:
+					print(f'  Repository path is not a directory: {repo_path}')
+				return False
+			
+			# Check read permissions
+			if not os.access(repo_path, os.R_OK):
+				if conf['verbose']:
+					print(f'  No read permission for repository: {repo_path}')
+				return False
+			
+			# Validate it's a proper git repository
+			if not is_git_repository(repo_path):
+				if conf['verbose']:
+					print(f'  Not a valid git repository: {repo_path}')
+				return False
+			
+			# Try to access the repository with git
+			prev_dir = os.getcwd()
+			try:
+				os.chdir(repo_path)
+				# Try a simple git command to ensure the repo is accessible
+				result = getpipeoutput(['git rev-parse --git-dir'], quiet=True)
+				if not result.strip():
+					if conf['verbose']:
+						print(f'  Git repository appears to be corrupted: {repo_path}')
+					return False
+			except Exception as e:
+				if conf['verbose']:
+					print(f'  Error accessing git repository {repo_path}: {e}')
+				return False
+			finally:
+				os.chdir(prev_dir)
+			
+			return True
+			
+		except Exception as e:
+			if conf['verbose']:
+				print(f'  Error validating repository {repo_name}: {e}')
+			return False
+	
+	def _sanitize_filename(self, filename):
+		"""Sanitize a filename to be safe for filesystem use."""
+		import re
+		# Replace any characters that might be problematic in filenames
+		safe_name = re.sub(r'[<>:"/\\|?*]', '_', filename)
+		# Remove any leading/trailing dots or spaces
+		safe_name = safe_name.strip('. ')
+		# Ensure it's not empty
+		if not safe_name:
+			safe_name = 'unnamed_repo'
+		return safe_name
+	
+	def _process_single_repository_safe(self, repo_path, output_path, rundir, repo_name):
+		"""Process a single repository with additional safety measures."""
+		import signal
+		import threading
+		
+		# Store original signal handler
+		original_sigterm = signal.signal(signal.SIGTERM, signal.SIG_DFL)
+		
+		try:
+			self.process_single_repository(repo_path, output_path, rundir)
+		except KeyboardInterrupt:
+			# Re-raise keyboard interrupt to allow proper cleanup
+			raise
+		except Exception as e:
+			# Enhance error message with repository context
+			enhanced_error = f"Error processing {repo_name}: {str(e)}"
+			raise Exception(enhanced_error) from e
+		finally:
+			# Restore original signal handler
+			signal.signal(signal.SIGTERM, original_sigterm)
+	
+	def _generate_multi_repo_summary(self, base_outputpath, repositories, successful_count, 
+									failed_reports, skipped_repos, total_time):
+		"""Generate a summary HTML report for multi-repository processing."""
+		try:
+			summary_file = os.path.join(base_outputpath, 'multi_repo_summary.html')
+			
+			with open(summary_file, 'w') as f:
+				f.write('<!DOCTYPE html>\n<html>\n<head>\n')
+				f.write('<meta charset="UTF-8">\n')
+				f.write('<title>Multi-Repository Summary</title>\n')
+				f.write('<style>\n')
+				f.write('body { font-family: Arial, sans-serif; margin: 20px; }\n')
+				f.write('table { border-collapse: collapse; width: 100%; }\n')
+				f.write('th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }\n')
+				f.write('th { background-color: #f2f2f2; }\n')
+				f.write('.success { color: green; }\n')
+				f.write('.failure { color: red; }\n')
+				f.write('.skipped { color: orange; }\n')
+				f.write('</style>\n')
+				f.write('</head>\n<body>\n')
+				
+				f.write('<h1>Multi-Repository Analysis Summary</h1>\n')
+				f.write(f'<p>Generated on: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>\n')
+				f.write(f'<p>Total processing time: {total_time:.2f} seconds</p>\n')
+				
+				# Summary statistics
+				f.write('<h2>Summary Statistics</h2>\n')
+				f.write('<ul>\n')
+				f.write(f'<li>Total repositories found: {len(repositories)}</li>\n')
+				f.write(f'<li class="success">Successfully processed: {successful_count}</li>\n')
+				f.write(f'<li class="failure">Failed: {len(failed_reports)}</li>\n')
+				f.write(f'<li class="skipped">Skipped: {len(skipped_repos)}</li>\n')
+				f.write('</ul>\n')
+				
+				# Repository table
+				f.write('<h2>Repository Details</h2>\n')
+				f.write('<table>\n')
+				f.write('<tr><th>Repository</th><th>Type</th><th>Status</th><th>Report Link</th></tr>\n')
+				
+				# Successful repositories
+				for repo_name, repo_path, repo_type in repositories:
+					if not any(repo_name == failed[0] for failed in failed_reports):
+						safe_repo_name = self._sanitize_filename(repo_name)
+						report_link = f'{safe_repo_name}_report/index.html'
+						f.write(f'<tr><td>{repo_name}</td><td>{repo_type}</td>')
+						f.write(f'<td class="success">Success</td>')
+						f.write(f'<td><a href="{report_link}">View Report</a></td></tr>\n')
+				
+				# Failed repositories
+				for repo_name, error in failed_reports:
+					f.write(f'<tr><td>{repo_name}</td><td>-</td>')
+					f.write(f'<td class="failure">Failed: {error}</td>')
+					f.write(f'<td>-</td></tr>\n')
+				
+				# Skipped repositories
+				for repo_name, reason in skipped_repos:
+					f.write(f'<tr><td>{repo_name}</td><td>-</td>')
+					f.write(f'<td class="skipped">Skipped: {reason}</td>')
+					f.write(f'<td>-</td></tr>\n')
+				
+				f.write('</table>\n')
+				f.write('</body>\n</html>\n')
+			
+			if conf['verbose']:
+				print(f'Generated summary report: {summary_file}')
+				
+		except Exception as e:
+			if conf['verbose']:
+				print(f'Warning: Could not generate summary report: {e}')
 	
 	def run_single_mode(self, args):
 		"""Original single/multiple repository mode."""
@@ -4537,38 +5303,133 @@ class GitStats:
 			print()
 	
 	def process_single_repository(self, repo_path, output_path, rundir):
-		"""Process a single repository and generate its report."""
+		"""Process a single repository and generate its report with improved resource management."""
+		import gc
+		
+		# Validate inputs
+		if not os.path.exists(repo_path):
+			raise FileNotFoundError(f"Repository path does not exist: {repo_path}")
+		if not os.path.isdir(repo_path):
+			raise NotADirectoryError(f"Repository path is not a directory: {repo_path}")
+		if not is_git_repository(repo_path):
+			raise ValueError(f"Path is not a valid git repository: {repo_path}")
+		
 		cachefile = os.path.join(output_path, 'gitstats.cache')
 
-		data = GitDataCollector()
-		data.loadCache(cachefile)
+		# Initialize data collector with proper cleanup
+		data = None
+		try:
+			data = GitDataCollector()
+			
+			# Load cache if available
+			try:
+				data.loadCache(cachefile)
+				if conf['verbose']:
+					print(f'  Loaded cache from: {cachefile}')
+			except Exception as e:
+				if conf['verbose']:
+					print(f'  Could not load cache: {e}')
+			
+			if conf['verbose']:
+				print(f'  Collecting data from: {repo_path}')
+			
+			# Change to repository directory
+			prevdir = os.getcwd()
+			try:
+				os.chdir(repo_path)
+				
+				# Collect data with memory monitoring
+				initial_memory = self._get_memory_usage()
+				
+				data.collect(repo_path)
+				
+				final_memory = self._get_memory_usage()
+				if conf['verbose'] and initial_memory and final_memory:
+					memory_delta = final_memory - initial_memory
+					print(f'  Memory usage: {memory_delta:.1f} MB')
+				
+			finally:
+				os.chdir(prevdir)
 
-		print(f'  Collecting data from: {repo_path}')
+			if conf['verbose']:
+				print('  Refining data...')
+			
+			# Save cache before refining (in case refining fails)
+			try:
+				data.saveCache(cachefile)
+				if conf['verbose']:
+					print(f'  Saved cache to: {cachefile}')
+			except Exception as e:
+				if conf['verbose']:
+					print(f'  Warning: Could not save cache: {e}')
+			
+			data.refine()
+
+			# Return to original directory
+			os.chdir(rundir)
+
+			if conf['verbose']:
+				print('  Generating reports...')
+			
+			# Generate HTML report
+			try:
+				if conf['verbose']:
+					print('  Creating HTML report...')
+				html_report = HTMLReportCreator()
+				html_report.create(data, output_path)
+			except Exception as e:
+				print(f'  Warning: HTML report generation failed: {e}')
+				if conf['debug']:
+					import traceback
+					traceback.print_exc()
+			
+			# Generate PDF report
+			try:
+				if conf['verbose']:
+					print('  Creating PDF report...')
+				pdf_report = PDFReportCreator()
+				pdf_report.create(data, output_path)
+			except Exception as e:
+				print(f'  Warning: PDF report generation failed: {e}')
+				if conf['debug']:
+					import traceback
+					traceback.print_exc()
+
+			if conf['verbose']:
+				print(f'  Report generated in: {output_path}')
 		
-		prevdir = os.getcwd()
-		os.chdir(repo_path)
-
-		data.collect(repo_path)
-		os.chdir(prevdir)
-
-		print('  Refining data...')
-		data.saveCache(cachefile)
-		data.refine()
-
-		os.chdir(rundir)
-
-		print('  Generating report...')
+		except Exception as e:
+			# Clean up partial output on error if configured to do so
+			if conf.get('multi_repo_cleanup_on_error', True):
+				try:
+					if os.path.exists(output_path):
+						import shutil
+						# Only clean up if it looks like our output directory
+						if output_path.endswith('_report'):
+							shutil.rmtree(output_path)
+							if conf['verbose']:
+								print(f'  Cleaned up partial output: {output_path}')
+				except Exception as cleanup_error:
+					if conf['debug']:
+						print(f'  Warning: Cleanup failed: {cleanup_error}')
+			raise e
 		
-		# Always generate both HTML and PDF reports
-		print('  Creating HTML report...')
-		html_report = HTMLReportCreator()
-		html_report.create(data, output_path)
-		
-		print('  Creating PDF report...')
-		pdf_report = PDFReportCreator()
-		pdf_report.create(data, output_path)
-
-		print(f'  Report generated in: {output_path}')
+		finally:
+			# Force garbage collection to free memory
+			if data:
+				del data
+			gc.collect()
+	
+	def _get_memory_usage(self):
+		"""Get current memory usage in MB. Returns None if unavailable."""
+		try:
+			import psutil
+			process = psutil.Process()
+			return process.memory_info().rss / 1024 / 1024  # Convert to MB
+		except ImportError:
+			return None
+		except Exception:
+			return None
 
 if __name__=='__main__':
 	try:
