@@ -1,10 +1,11 @@
 fpdf2==2.8.3  # package provides the `fpdf` module (fpdf2)
 psutil==7.0.0
+matplotlib>=3.7.0
 
 # Notes:
 # - System tools (not Python packages):
 #   - `git` (found: git version 2.47.3)
-#   - `gnuplot` (found: gnuplot 6.0 patchlevel 2)
+#   - `matplotlib` (Python package for chart generation)
 # - If you're using a virtual environment, install with:
 #
 #   python3 -m venv .venv

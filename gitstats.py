@@ -13,6 +13,11 @@ import zlib
 from collections import defaultdict
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 if sys.version_info < (3, 6):
 	print("Python 3.6 or higher is required for gitstats", file=sys.stderr)
@@ -22,7 +27,10 @@ from multiprocessing import Pool
 
 os.environ['LC_ALL'] = 'C'
 
-GNUPLOT_COMMON = 'set terminal png transparent size 640,240\nset size 1.0,1.0\n'
+# Matplotlib configuration
+MATPLOTLIB_DPI = 100
+MATPLOTLIB_FIGSIZE = (6.4, 2.4)  # Equivalent to 640x240 at 100 DPI
+
 ON_LINUX = (platform.system() == 'Linux')
 WEEKDAYS = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')
 
@@ -30,11 +38,545 @@ exectime_internal = 0.0
 exectime_external = 0.0
 time_start = time.time()
 
-# By default, gnuplot is searched from path, but can be overridden with the
-# environment variable "GNUPLOT"
-gnuplot_cmd = 'gnuplot'
-if 'GNUPLOT' in os.environ:
-	gnuplot_cmd = os.environ['GNUPLOT']
+class MatplotlibChartGenerator:
+	"""Generates charts using matplotlib to replace gnuplot functionality."""
+	
+	def __init__(self):
+		self.dpi = MATPLOTLIB_DPI
+		self.figsize = MATPLOTLIB_FIGSIZE
+		
+	def _setup_figure(self, title=""):
+		"""Create and configure a new figure."""
+		plt.style.use('default')
+		fig, ax = plt.subplots(figsize=self.figsize, dpi=self.dpi)
+		ax.grid(True, alpha=0.3)
+		return fig, ax
+	
+	def _save_figure(self, fig, output_path):
+		"""Save the figure to a file with improved layout handling."""
+		# Apply tight layout with padding for better text visibility
+		fig.tight_layout(pad=2.0)
+		
+		# Additional bottom margin for rotated x-axis labels
+		fig.subplots_adjust(bottom=0.15)
+		
+		fig.savefig(output_path, dpi=self.dpi, bbox_inches='tight', 
+					facecolor='white', edgecolor='none', transparent=True,
+					pad_inches=0.2)  # Add padding around the plot
+		plt.close(fig)
+	
+	def create_hour_of_day_chart(self, data_file, output_path):
+		"""Create hour of day activity chart."""
+		try:
+			# Read data file
+			hours = []
+			commits = []
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 2:
+						hours.append(int(parts[0]))
+						commits.append(int(parts[1]))
+			
+			if not hours:
+				return
+			
+			fig, ax = self._setup_figure()
+			
+			# Create bar chart
+			bars = ax.bar(hours, commits, width=0.8, color='#4472C4', alpha=0.7)
+			
+			ax.set_xlabel('Hour of Day')
+			ax.set_ylabel('Commits')
+			ax.set_xlim(0.5, 24.5)
+			ax.set_xticks(range(0, 25, 4))
+			ax.set_ylim(0, max(commits) * 1.1 if commits else 1)
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create hour_of_day chart: {e}")
+	
+	def create_day_of_week_chart(self, data_file, output_path):
+		"""Create day of week activity chart."""
+		try:
+			# Read data file
+			day_nums = []
+			day_names = []
+			commits = []
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 3:
+						day_nums.append(int(parts[0]))
+						day_names.append(parts[1])
+						commits.append(int(parts[2]))
+			
+			if not day_nums:
+				return
+			
+			fig, ax = self._setup_figure()
+			
+			# Create bar chart
+			bars = ax.bar(day_nums, commits, width=0.8, color='#4472C4', alpha=0.7)
+			
+			ax.set_xlabel('Day of Week')
+			ax.set_ylabel('Commits')
+			ax.set_xlim(0.5, 7.5)
+			ax.set_xticks(day_nums)
+			ax.set_xticklabels(day_names)
+			ax.set_ylim(0, max(commits) * 1.1 if commits else 1)
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create day_of_week chart: {e}")
+	
+	def create_domains_chart(self, data_file, output_path):
+		"""Create domains activity chart."""
+		try:
+			# Read data file
+			domains = []
+			commits = []
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 3:
+						domains.append(parts[0])
+						commits.append(int(parts[2]))
+			
+			if not domains:
+				return
+			
+			fig, ax = self._setup_figure()
+			
+			# Create horizontal bar chart for better domain name visibility
+			y_pos = range(len(domains))
+			bars = ax.barh(y_pos, commits, color='#4472C4', alpha=0.7)
+			
+			ax.set_xlabel('Commits')
+			ax.set_ylabel('Domains')
+			ax.set_yticks(y_pos)
+			ax.set_yticklabels(domains, fontsize=9)
+			ax.set_xlim(0, max(commits) * 1.1 if commits else 1)
+			
+			# Invert y-axis to match gnuplot behavior
+			ax.invert_yaxis()
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create domains chart: {e}")
+	
+	def create_month_of_year_chart(self, data_file, output_path):
+		"""Create month of year activity chart."""
+		try:
+			# Read data file
+			months = []
+			commits = []
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 2:
+						months.append(int(parts[0]))
+						commits.append(int(parts[1]))
+			
+			if not months:
+				return
+			
+			fig, ax = self._setup_figure()
+			
+			# Create bar chart
+			bars = ax.bar(months, commits, width=0.8, color='#4472C4', alpha=0.7)
+			
+			ax.set_xlabel('Month')
+			ax.set_ylabel('Commits')
+			ax.set_xlim(0.5, 12.5)
+			ax.set_xticks(range(1, 13))
+			ax.set_ylim(0, max(commits) * 1.1 if commits else 1)
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create month_of_year chart: {e}")
+	
+	def create_commits_by_year_month_chart(self, data_file, output_path):
+		"""Create commits by year-month chart."""
+		try:
+			# Read data file
+			dates = []
+			commits = []
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 2:
+						try:
+							date_obj = datetime.datetime.strptime(parts[0], '%Y-%m')
+							dates.append(date_obj)
+							commits.append(int(parts[1]))
+						except ValueError:
+							continue
+			
+			if not dates:
+				return
+			
+			fig, ax = self._setup_figure()
+			
+			# Create bar chart
+			bars = ax.bar(dates, commits, width=20, color='#4472C4', alpha=0.7)
+			
+			ax.set_xlabel('Year-Month')
+			ax.set_ylabel('Commits')
+			ax.set_ylim(0, max(commits) * 1.1 if commits else 1)
+			
+			# Format x-axis with improved spacing and readability
+			ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+			# Use smarter locator based on data range
+			date_range = max(dates) - min(dates)
+			if date_range.days > 1460:  # > 4 years
+				ax.xaxis.set_major_locator(mdates.YearLocator())
+			elif date_range.days > 730:  # > 2 years
+				ax.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+			elif date_range.days > 365:  # > 1 year
+				ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+			else:
+				ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(1, len(dates)//8)))
+			
+			# Improve label formatting
+			plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right', fontsize=9)
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create commits_by_year_month chart: {e}")
+	
+	def create_commits_by_year_chart(self, data_file, output_path):
+		"""Create commits by year chart."""
+		try:
+			# Read data file
+			years = []
+			commits = []
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 2:
+						years.append(int(parts[0]))
+						commits.append(int(parts[1]))
+			
+			if not years:
+				return
+			
+			fig, ax = self._setup_figure()
+			
+			# Create bar chart
+			bars = ax.bar(years, commits, width=0.8, color='#4472C4', alpha=0.7)
+			
+			ax.set_xlabel('Year')
+			ax.set_ylabel('Commits')
+			ax.set_ylim(0, max(commits) * 1.1 if commits else 1)
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create commits_by_year chart: {e}")
+	
+	def create_files_by_date_chart(self, data_file, output_path):
+		"""Create files by date chart."""
+		try:
+			# Read data file
+			dates = []
+			files = []
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 2:
+						try:
+							date_obj = datetime.datetime.strptime(parts[0], '%Y-%m-%d')
+							dates.append(date_obj)
+							files.append(int(parts[1]))
+						except ValueError:
+							continue
+			
+			if not dates:
+				return
+			
+			fig, ax = self._setup_figure()
+			
+			# Create step plot
+			ax.step(dates, files, where='post', color='#4472C4', linewidth=1.5)
+			
+			ax.set_xlabel('Date')
+			ax.set_ylabel('Files')
+			ax.set_ylim(0, max(files) * 1.1 if files else 1)
+			
+			# Format x-axis with smart date locating and improved readability
+			date_range = max(dates) - min(dates)
+			if date_range.days > 1825:  # > 5 years
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+				ax.xaxis.set_major_locator(mdates.YearLocator())
+			elif date_range.days > 730:  # > 2 years
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+				ax.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+			elif date_range.days > 90:  # > 3 months
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+				ax.xaxis.set_major_locator(mdates.MonthLocator())
+			else:
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+				ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, date_range.days//10)))
+			
+			# Improve label formatting
+			plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right', fontsize=9)
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create files_by_date chart: {e}")
+	
+	def create_lines_of_code_chart(self, data_file, output_path):
+		"""Create lines of code chart."""
+		try:
+			# Read data file
+			timestamps = []
+			lines = []
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 2:
+						try:
+							timestamp = int(parts[0])
+							date_obj = datetime.datetime.fromtimestamp(timestamp)
+							timestamps.append(date_obj)
+							lines.append(int(parts[1]))
+						except ValueError:
+							continue
+			
+			if not timestamps:
+				return
+			
+			fig, ax = self._setup_figure()
+			
+			# Create line plot
+			ax.plot(timestamps, lines, color='#4472C4', linewidth=1.5)
+			
+			ax.set_xlabel('Date')
+			ax.set_ylabel('Lines')
+			ax.set_ylim(0, max(lines) * 1.1 if lines else 1)
+			
+			# Format x-axis with smart date locating and improved readability
+			date_range = max(timestamps) - min(timestamps)
+			if date_range.days > 1825:  # > 5 years
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+				ax.xaxis.set_major_locator(mdates.YearLocator())
+			elif date_range.days > 730:  # > 2 years
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+				ax.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+			elif date_range.days > 90:  # > 3 months
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+				ax.xaxis.set_major_locator(mdates.MonthLocator())
+			else:
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+				ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, date_range.days//10)))
+			
+			# Improve label formatting
+			plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right', fontsize=9)
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create lines_of_code chart: {e}")
+	
+	def create_lines_of_code_by_author_chart(self, data_file, output_path, authors):
+		"""Create lines of code by author chart."""
+		try:
+			# Read data file
+			data = {}
+			timestamps = []
+			
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 2:
+						try:
+							timestamp = int(parts[0])
+							date_obj = datetime.datetime.fromtimestamp(timestamp)
+							timestamps.append(date_obj)
+							
+							# Initialize data for this timestamp
+							if date_obj not in data:
+								data[date_obj] = {}
+							
+							# Read values for each author
+							for i, author in enumerate(authors):
+								if i + 1 < len(parts):
+									data[date_obj][author] = int(parts[i + 1])
+								else:
+									data[date_obj][author] = 0
+						except ValueError:
+							continue
+			
+			if not timestamps:
+				return
+			
+			fig, ax = self._setup_figure()
+			fig.set_size_inches(6.4, 4.8)  # Larger for multiple lines
+			
+			# Create line plots for each author
+			colors = plt.cm.tab10(range(len(authors)))
+			for i, author in enumerate(authors):
+				author_data = [data.get(ts, {}).get(author, 0) for ts in timestamps]
+				ax.plot(timestamps, author_data, color=colors[i], 
+						linewidth=1.5, label=author, alpha=0.8)
+			
+			ax.set_xlabel('Date')
+			ax.set_ylabel('Lines')
+			ax.legend(loc='upper left', fontsize=8)
+			
+			# Format x-axis with smart date locating and improved readability
+			date_range = max(timestamps) - min(timestamps)
+			if date_range.days > 1825:  # > 5 years
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+				ax.xaxis.set_major_locator(mdates.YearLocator())
+			elif date_range.days > 730:  # > 2 years
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+				ax.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+			elif date_range.days > 90:  # > 3 months
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+				ax.xaxis.set_major_locator(mdates.MonthLocator())
+			else:
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+				ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, date_range.days//10)))
+			
+			# Improve label formatting
+			plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right', fontsize=9)
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create lines_of_code_by_author chart: {e}")
+	
+	def create_commits_by_author_chart(self, data_file, output_path, authors):
+		"""Create commits by author chart."""
+		try:
+			# Read data file
+			data = {}
+			timestamps = []
+			
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 2:
+						try:
+							timestamp = int(parts[0])
+							date_obj = datetime.datetime.fromtimestamp(timestamp)
+							timestamps.append(date_obj)
+							
+							# Initialize data for this timestamp
+							if date_obj not in data:
+								data[date_obj] = {}
+							
+							# Read values for each author
+							for i, author in enumerate(authors):
+								if i + 1 < len(parts):
+									data[date_obj][author] = int(parts[i + 1])
+								else:
+									data[date_obj][author] = 0
+						except ValueError:
+							continue
+			
+			if not timestamps:
+				return
+			
+			fig, ax = self._setup_figure()
+			fig.set_size_inches(6.4, 4.8)  # Larger for multiple lines
+			
+			# Create line plots for each author
+			colors = plt.cm.tab10(range(len(authors)))
+			for i, author in enumerate(authors):
+				author_data = [data.get(ts, {}).get(author, 0) for ts in timestamps]
+				ax.plot(timestamps, author_data, color=colors[i], 
+						linewidth=1.5, label=author, alpha=0.8)
+			
+			ax.set_xlabel('Date')
+			ax.set_ylabel('Commits')
+			ax.legend(loc='upper left', fontsize=8)
+			
+			# Format x-axis with smart date locating and improved readability
+			date_range = max(timestamps) - min(timestamps)
+			if date_range.days > 1825:  # > 5 years
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+				ax.xaxis.set_major_locator(mdates.YearLocator())
+			elif date_range.days > 730:  # > 2 years
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+				ax.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+			elif date_range.days > 90:  # > 3 months
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+				ax.xaxis.set_major_locator(mdates.MonthLocator())
+			else:
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+				ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, date_range.days//10)))
+			
+			# Improve label formatting
+			plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right', fontsize=9)
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create commits_by_author chart: {e}")
+	
+	def create_pace_of_changes_chart(self, data_file, output_path):
+		"""Create pace of changes chart."""
+		try:
+			# Read data file
+			timestamps = []
+			changes = []
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 2:
+						try:
+							timestamp = int(parts[0])
+							date_obj = datetime.datetime.fromtimestamp(timestamp)
+							timestamps.append(date_obj)
+							changes.append(int(parts[1]))
+						except ValueError:
+							continue
+			
+			if not timestamps:
+				return
+			
+			fig, ax = self._setup_figure()
+			
+			# Create line plot
+			ax.plot(timestamps, changes, color='#4472C4', linewidth=2)
+			
+			ax.set_xlabel('Date')
+			ax.set_ylabel('Line Changes (Additions + Deletions)')
+			ax.set_ylim(0, max(changes) * 1.1 if changes else 1)
+			
+			# Format x-axis with smart date locating and improved readability
+			date_range = max(timestamps) - min(timestamps)
+			if date_range.days > 1825:  # > 5 years
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+				ax.xaxis.set_major_locator(mdates.YearLocator())
+			elif date_range.days > 730:  # > 2 years
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+				ax.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+			elif date_range.days > 90:  # > 3 months
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+				ax.xaxis.set_major_locator(mdates.MonthLocator())
+			else:
+				ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+				ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, date_range.days//10)))
+			
+			# Improve label formatting
+			plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right', fontsize=9)
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create pace_of_changes chart: {e}")
+
+# By default, matplotlib is used for chart generation
 
 conf = {
 	'max_domains': 10,
@@ -138,8 +680,12 @@ def getversion():
 def getgitversion():
 	return getpipeoutput(['git --version']).split('\n')[0]
 
-def getgnuplotversion():
-	return getpipeoutput(['%s --version' % gnuplot_cmd]).split('\n')[0]
+def getmatplotlibversion():
+	try:
+		import matplotlib
+		return f"matplotlib {matplotlib.__version__}"
+	except ImportError:
+		return "matplotlib not available"
 
 def getnumoffilesfromrev(time_rev):
 	"""
@@ -1929,7 +2475,7 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<dl>')
 		f.write('<dt>Project name</dt><dd>%s</dd>' % (data.projectname))
 		f.write('<dt>Generated</dt><dd>%s (in %d seconds)</dd>' % (datetime.datetime.now().strftime(format), time.time() - data.getStampCreated()))
-		f.write('<dt>Generator</dt><dd><a href="http://gitstats.sourceforge.net/">GitStats</a> (version %s), %s, %s</dd>' % (getversion(), getgitversion(), getgnuplotversion()))
+		f.write('<dt>Generator</dt><dd><a href="http://gitstats.sourceforge.net/">GitStats</a> (version %s), %s, %s</dd>' % (getversion(), getgitversion(), getmatplotlibversion()))
 		f.write('<dt>Report Period</dt><dd>%s to %s</dd>' % (data.getFirstCommitDate().strftime(format), data.getLastCommitDate().strftime(format)))
 		f.write('<dt>Age</dt><dd>%d days, %d active days (%3.2f%%)</dd>' % (data.getCommitDeltaDays(), total_active_days, (100.0 * total_active_days / data.getCommitDeltaDays()) if data.getCommitDeltaDays() else 0.0))
 		f.write('<dt>Total Files</dt><dd>%s</dd>' % data.getTotalFiles())
@@ -2998,228 +3544,67 @@ class HTMLReportCreator(ReportCreator):
 		return ", ".join(assessments) if assessments else "Standard Contributor"
 	
 	def createGraphs(self, path):
-		print('Generating graphs...')
-
-		# hour of day
-		f = open(path + '/hour_of_day.plot', 'w')
-		f.write(GNUPLOT_COMMON)
-		f.write(
-"""
-set output 'hour_of_day.png'
-unset key
-set xrange [0.5:24.5]
-set yrange [0:]
-set xtics 4
-set grid y
-set ylabel "Commits"
-plot 'hour_of_day.dat' using 1:2:(0.5) w boxes fs solid
-""")
-		f.close()
-
-		# day of week
-		f = open(path + '/day_of_week.plot', 'w')
-		f.write(GNUPLOT_COMMON)
-		f.write(
-"""
-set output 'day_of_week.png'
-unset key
-set xrange [0.5:7.5]
-set yrange [0:]
-set xtics 1
-set grid y
-set ylabel "Commits"
-plot 'day_of_week.dat' using 1:3:(0.5):xtic(2) w boxes fs solid
-""")
-		f.close()
-
-		# Domains
-		f = open(path + '/domains.plot', 'w')
-		f.write(GNUPLOT_COMMON)
-		f.write(
-"""
-set output 'domains.png'
-unset key
-unset xtics
-set yrange [0:]
-set grid y
-set ylabel "Commits"
-plot 'domains.dat' using 2:3:(0.5) with boxes fs solid, '' using 2:3:1 with labels rotate by 45 offset 0,1
-""")
-		f.close()
-
-		# Month of Year
-		f = open(path + '/month_of_year.plot', 'w')
-		f.write(GNUPLOT_COMMON)
-		f.write(
-"""
-set output 'month_of_year.png'
-unset key
-set xrange [0.5:12.5]
-set yrange [0:]
-set xtics 1
-set grid y
-set ylabel "Commits"
-plot 'month_of_year.dat' using 1:2:(0.5) w boxes fs solid
-""")
-		f.close()
-
-		# commits_by_year_month
-		f = open(path + '/commits_by_year_month.plot', 'w')
-		f.write(GNUPLOT_COMMON)
-		f.write(
-"""
-set output 'commits_by_year_month.png'
-unset key
-set yrange [0:]
-set xdata time
-set timefmt "%Y-%m"
-set format x "%Y-%m"
-set xtics rotate
-set bmargin 5
-set grid y
-set ylabel "Commits"
-plot 'commits_by_year_month.dat' using 1:2:(0.5) w boxes fs solid
-""")
-		f.close()
-
-		# commits_by_year
-		f = open(path + '/commits_by_year.plot', 'w')
-		f.write(GNUPLOT_COMMON)
-		f.write(
-"""
-set output 'commits_by_year.png'
-unset key
-set yrange [0:]
-set xtics 1 rotate
-set grid y
-set ylabel "Commits"
-set yrange [0:]
-plot 'commits_by_year.dat' using 1:2:(0.5) w boxes fs solid
-""")
-		f.close()
-
-		# Files by date
-		f = open(path + '/files_by_date.plot', 'w')
-		f.write(GNUPLOT_COMMON)
-		f.write(
-"""
-set output 'files_by_date.png'
-unset key
-set yrange [0:]
-set xdata time
-set timefmt "%Y-%m-%d"
-set format x "%Y-%m-%d"
-set grid y
-set ylabel "Files"
-set xtics rotate
-set ytics autofreq
-set bmargin 6
-plot 'files_by_date.dat' using 1:2 w steps
-""")
-		f.close()
-
-		# Lines of Code
-		f = open(path + '/lines_of_code.plot', 'w')
-		f.write(GNUPLOT_COMMON)
-		f.write(
-"""
-set output 'lines_of_code.png'
-unset key
-set yrange [0:]
-set xdata time
-set timefmt "%s"
-set format x "%Y-%m-%d"
-set grid y
-set ylabel "Lines"
-set xtics rotate
-set bmargin 6
-plot 'lines_of_code.dat' using 1:2 w lines
-""")
-		f.close()
-
-		# Lines of Code Added per author
-		f = open(path + '/lines_of_code_by_author.plot', 'w')
-		f.write(GNUPLOT_COMMON)
-		f.write(
-"""
-set terminal png transparent size 640,480
-set output 'lines_of_code_by_author.png'
-set key left top
-set yrange [0:]
-set xdata time
-set timefmt "%s"
-set format x "%Y-%m-%d"
-set grid y
-set ylabel "Lines"
-set xtics rotate
-set bmargin 6
-plot """
-)
-		i = 1
-		plots = []
-		for a in self.authors_to_plot:
-			i = i + 1
-			author = a.replace("\"", "\\\"").replace("`", "")
-			plots.append("""'lines_of_code_by_author.dat' using 1:%d title "%s" w lines""" % (i, author))
-		f.write(", ".join(plots))
-		f.write('\n')
-
-		f.close()
-
-		# Commits per author
-		f = open(path + '/commits_by_author.plot', 'w')
-		f.write(GNUPLOT_COMMON)
-		f.write(
-"""
-set terminal png transparent size 640,480
-set output 'commits_by_author.png'
-set key left top
-set yrange [0:]
-set xdata time
-set timefmt "%s"
-set format x "%Y-%m-%d"
-set grid y
-set ylabel "Commits"
-set xtics rotate
-set bmargin 6
-plot """
-)
-		i = 1
-		plots = []
-		for a in self.authors_to_plot:
-			i = i + 1
-			author = a.replace("\"", "\\\"").replace("`", "")
-			plots.append("""'commits_by_author.dat' using 1:%d title "%s" w lines""" % (i, author))
-		f.write(", ".join(plots))
-		f.write('\n')
-
-		f.close()
-
-		# Pace of Changes plot
-		f = open(path + '/pace_of_changes.plot', 'w')
-		f.write(GNUPLOT_COMMON)
-		f.write(
-"""
-set output 'pace_of_changes.png'
-unset key
-set yrange [0:]
-set xdata time
-set timefmt "%s"
-set format x "%Y-%m-%d"
-set grid y
-set ylabel "Line Changes (Additions + Deletions)"
-set xtics rotate
-set bmargin 6
-plot 'pace_of_changes.dat' using 1:2 w lines lw 2
-""")
-		f.close()
-
+		print('Generating graphs with matplotlib...')
+		
+		# Initialize matplotlib chart generator
+		chart_generator = MatplotlibChartGenerator()
+		
+		# Change to the output directory
+		old_dir = os.getcwd()
 		os.chdir(path)
-		files = glob.glob(path + '/*.plot')
-		for f in files:
-			out = getpipeoutput([gnuplot_cmd + ' "%s"' % f])
-			if len(out) > 0:
-				print(out)
+		
+		try:
+			# Generate all the chart types if their data files exist
+			
+			# hour of day
+			if os.path.exists('hour_of_day.dat'):
+				chart_generator.create_hour_of_day_chart('hour_of_day.dat', 'hour_of_day.png')
+			
+			# day of week
+			if os.path.exists('day_of_week.dat'):
+				chart_generator.create_day_of_week_chart('day_of_week.dat', 'day_of_week.png')
+			
+			# domains
+			if os.path.exists('domains.dat'):
+				chart_generator.create_domains_chart('domains.dat', 'domains.png')
+			
+			# month of year
+			if os.path.exists('month_of_year.dat'):
+				chart_generator.create_month_of_year_chart('month_of_year.dat', 'month_of_year.png')
+			
+			# commits by year-month
+			if os.path.exists('commits_by_year_month.dat'):
+				chart_generator.create_commits_by_year_month_chart('commits_by_year_month.dat', 'commits_by_year_month.png')
+			
+			# commits by year
+			if os.path.exists('commits_by_year.dat'):
+				chart_generator.create_commits_by_year_chart('commits_by_year.dat', 'commits_by_year.png')
+			
+			# files by date
+			if os.path.exists('files_by_date.dat'):
+				chart_generator.create_files_by_date_chart('files_by_date.dat', 'files_by_date.png')
+			
+			# lines of code
+			if os.path.exists('lines_of_code.dat'):
+				chart_generator.create_lines_of_code_chart('lines_of_code.dat', 'lines_of_code.png')
+			
+			# lines of code by author
+			if os.path.exists('lines_of_code_by_author.dat') and hasattr(self, 'authors_to_plot'):
+				chart_generator.create_lines_of_code_by_author_chart('lines_of_code_by_author.dat', 'lines_of_code_by_author.png', self.authors_to_plot)
+			
+			# commits by author
+			if os.path.exists('commits_by_author.dat') and hasattr(self, 'authors_to_plot'):
+				chart_generator.create_commits_by_author_chart('commits_by_author.dat', 'commits_by_author.png', self.authors_to_plot)
+			
+			# pace of changes
+			if os.path.exists('pace_of_changes.dat'):
+				chart_generator.create_pace_of_changes_chart('pace_of_changes.dat', 'pace_of_changes.png')
+				
+		except Exception as e:
+			print(f"Warning: Error generating charts: {e}")
+		finally:
+			# Always restore the original directory
+			os.chdir(old_dir)
 
 	def printHeader(self, f, title = ''):
 		f.write(
@@ -3689,8 +4074,8 @@ class PDFReportCreator(ReportCreator):
 		self.pdf.cell(0, 10, f'Generated: {datetime.datetime.now().strftime(format)}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 		self.pdf.cell(0, 10, f'Generator: GitStats (version {getversion()})', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 		self.pdf.cell(0, 10, f'Git Version: {getgitversion()}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-		if getgnuplotversion():
-			self.pdf.cell(0, 10, f'Gnuplot Version: {getgnuplotversion()}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+		if getmatplotlibversion():
+			self.pdf.cell(0, 10, f'Matplotlib Version: {getmatplotlibversion()}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 		
 		self.pdf.ln(h=10)
 		self.pdf.cell(0, 10, f'Report Period: {data.getFirstCommitDate().strftime(format)} to {data.getLastCommitDate().strftime(format)}', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -4918,16 +5303,16 @@ class GitStats:
 			print(f'FATAL: No write permission for output directory: {base_outputpath}')
 			sys.exit(1)
 
-		# Validate gnuplot availability
+		# Validate matplotlib availability
 		try:
-			gnuplot_version = getgnuplotversion()
-			if not gnuplot_version:
-				print('FATAL: gnuplot not found - required for generating charts')
+			matplotlib_version = getmatplotlibversion()
+			if not matplotlib_version or "not available" in matplotlib_version:
+				print('FATAL: matplotlib not found - required for generating charts')
 				sys.exit(1)
 			if conf['verbose']:
-				print(f'Using {gnuplot_version}')
+				print(f'Using {matplotlib_version}')
 		except Exception as e:
-			print(f'FATAL: Error checking gnuplot: {e}')
+			print(f'FATAL: Error checking matplotlib: {e}')
 			sys.exit(1)
 
 		if conf['verbose']:
@@ -5245,8 +5630,8 @@ class GitStats:
 			print(f'FATAL: No write permission for output directory: {outputpath}')
 			sys.exit(1)
 
-		if not getgnuplotversion():
-			print('gnuplot not found')
+		if not getmatplotlibversion():
+			print('matplotlib not found')
 			sys.exit(1)
 
 		if conf['verbose']:
