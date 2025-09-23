@@ -593,7 +593,7 @@ conf = {
 	'debug': False,
 	'verbose': False,
 	# Multi-repo specific configuration
-	'multi_repo_recursive': False,
+	'multi_repo_max_depth': 3,
 	'multi_repo_max_depth': 3,
 	'multi_repo_include_patterns': None,
 	'multi_repo_exclude_patterns': None,
@@ -5132,7 +5132,7 @@ Options:
 -c key=value     Override configuration value
 --debug          Enable debug output
 --verbose        Enable verbose output
---multi-repo     Scan folder for multiple repositories and generate reports for each
+--multi-repo     Scan folder recursively for multiple repositories and generate reports for each
 -h, --help       Show this help message
 
 Note: GitStats always generates both HTML and PDF reports.
@@ -5140,21 +5140,21 @@ Note: GitStats always generates both HTML and PDF reports.
 Examples:
   gitstats repo output                    # Generates both HTML and PDF reports
   gitstats --verbose repo output          # With verbose output
-  gitstats --multi-repo /path/to/repos output  # Generate reports for all repos in folder
+  gitstats --multi-repo /path/to/repos output  # Generate reports for all repos found recursively
   gitstats --debug -c max_authors=50 repo output
   
   # Multi-repo with configuration options:
-  gitstats -c multi_repo_recursive=True --multi-repo /path/to/repos output
-  gitstats -c multi_repo_max_depth=5 -c multi_repo_recursive=True --multi-repo /path/to/repos output
+  gitstats -c multi_repo_max_depth=5 --multi-repo /path/to/repos output
+  gitstats -c multi_repo_include_patterns=proj*,app* --multi-repo /path/to/repos output
 
 With --multi-repo mode:
-- Scans the specified folder for git repositories
+- Recursively scans the specified folder and all subdirectories for git repositories
 - Creates a report for each repository in a subfolder named <reponame>_report
 - Only processes directories that are valid git repositories
 - Generates a summary report with links to all individual reports
+- Default maximum scan depth is 3 levels (configurable)
 
 Multi-repo configuration options (use with -c key=value):
-  multi_repo_recursive=True/False       # Enable recursive directory scanning (default: False)
   multi_repo_max_depth=N               # Maximum depth for recursive scanning (default: 3)
   multi_repo_include_patterns=pat1,pat2 # Comma-separated glob patterns for directories to include
   multi_repo_exclude_patterns=pat1,pat2 # Comma-separated glob patterns for directories to exclude
@@ -5233,21 +5233,19 @@ class GitStats:
 				print(f'FATAL: No read permission for scan folder: {scan_folder}')
 				sys.exit(1)
 			
-			# Check for additional multi-repo configuration options
-			recursive_scan = conf.get('multi_repo_recursive', False)
+			# Check for multi-repo configuration options
 			max_depth = conf.get('multi_repo_max_depth', 3)
 			include_patterns = conf.get('multi_repo_include_patterns', None)
 			exclude_patterns = conf.get('multi_repo_exclude_patterns', None)
 			
-			# Discover repositories with enhanced options
-			print(f'Scanning folder for git repositories: {scan_folder}')
-			if recursive_scan:
-				print(f'  Using recursive scanning (max depth: {max_depth})')
+			# Discover repositories with recursive scanning always enabled
+			print(f'Scanning folder recursively for git repositories: {scan_folder}')
+			print(f'  Maximum scanning depth: {max_depth}')
 			
 			try:
 				repositories = discover_repositories(
 					scan_folder, 
-					recursive=recursive_scan,
+					recursive=True,  # Always use recursive scanning
 					max_depth=max_depth,
 					include_patterns=include_patterns,
 					exclude_patterns=exclude_patterns
@@ -5261,8 +5259,7 @@ class GitStats:
 			
 			if not repositories:
 				print(f'No git repositories found in: {scan_folder}')
-				if not recursive_scan:
-					print('Hint: Try using recursive scanning with --multi-repo-recursive option')
+				print(f'Searched recursively up to depth {max_depth}')
 				sys.exit(0)
 			
 			print(f'Found {len(repositories)} git repositories:')
@@ -5831,5 +5828,4 @@ if __name__=='__main__':
 		if conf.get('debug', False):
 			import traceback
 			traceback.print_exc()
-		sys.exit(1)
-
+			sys.exit(1)
