@@ -2491,7 +2491,7 @@ class HTMLReportCreator(ReportCreator):
 		binarypath = os.path.dirname(os.path.abspath(__file__))
 		secondarypath = os.path.join(binarypath, '..', 'share', 'gitstats')
 		basedirs = [binarypath, secondarypath, '/usr/share/gitstats']
-		for file in (conf['style'], 'sortable.js', 'arrow-up.gif', 'arrow-down.gif', 'arrow-none.gif'):
+		for file in ('arrow-up.gif', 'arrow-down.gif', 'arrow-none.gif'):
 			for base in basedirs:
 				src = base + '/' + file
 				if os.path.exists(src):
@@ -2500,13 +2500,20 @@ class HTMLReportCreator(ReportCreator):
 			else:
 				print('Warning: "%s" not found, so not copied (searched: %s)' % (file, basedirs))
 
+		# Create single combined HTML file
 		f = open(path + "/index.html", 'w')
 		format = '%Y-%m-%d %H:%M:%S'
-		self.printHeader(f)
+		
+		# Write HTML header with embedded CSS and JavaScript
+		self.printCombinedHeader(f)
 
 		f.write('<h1>GitStats - %s</h1>' % data.projectname)
 
-		self.printNav(f)
+		self.printCombinedNav(f)
+
+		# General section
+		f.write('<div id="general" class="section">')
+		f.write(html_header(2, 'General'))
 
 		f.write('<dl>')
 		f.write('<dt>Project name</dt><dd>%s</dd>' % (data.projectname))
@@ -2554,16 +2561,12 @@ class HTMLReportCreator(ReportCreator):
 			f.write('<dt>Main Branch</dt><dd>%s</dd>' % main_branch)
 		
 		f.write('</dl>')
-
-		f.write('</body>\n</html>')
-		f.close()
+		f.write('</div>  <!-- end general section -->')
 
 		###
-		# Team Analysis - New comprehensive team analysis page
-		f = open(path + '/team_analysis.html', 'w')
-		self.printHeader(f)
-		f.write('<h1>Team Analysis</h1>')
-		self.printNav(f)
+		# Team Analysis - New comprehensive team analysis section
+		f.write('<div id="team_analysis" class="section">')
+		f.write(html_header(2, 'Team Analysis'))
 
 		# Team Overview
 		f.write(html_header(2, 'Team Overview'))
@@ -2865,15 +2868,12 @@ class HTMLReportCreator(ReportCreator):
 		
 		f.write('</table>')
 
-		f.write('</body></html>')
-		f.close()
+		f.write('</div>  <!-- end team_analysis section -->')
 
 		###
-		# Activity
-		f = open(path + '/activity.html', 'w')
-		self.printHeader(f)
-		f.write('<h1>Activity</h1>')
-		self.printNav(f)
+		# Activity section
+		f.write('<div id="activity" class="section">')
+		f.write(html_header(2, 'Activity'))
 
 		# Last 30 days
 		f.write(html_header(2, 'Last 30 Days'))
@@ -2958,20 +2958,24 @@ class HTMLReportCreator(ReportCreator):
 		# Hour of Day
 		f.write(html_header(2, 'Hour of Day'))
 		hour_of_day = data.getActivityByHourOfDay()
+		fg = open(path + '/hour_of_day.dat', 'w')
+		for i in range(0, 24):
+			if i in hour_of_day:
+				fg.write('%d %d\n' % (i + 1, hour_of_day[i]))
+			else:
+				fg.write('%d 0\n' % (i + 1))
+		fg.close()
+		f.write('<img src="hour_of_day.png" alt="Hour of Day">')
 		f.write('<table><tr><th>Hour</th>')
 		for i in range(0, 24):
 			f.write('<th>%d</th>' % i)
 		f.write('</tr>\n<tr><th>Commits</th>')
-		fp = open(path + '/hour_of_day.dat', 'w')
 		for i in range(0, 24):
 			if i in hour_of_day:
 				r = 127 + int((float(hour_of_day[i]) / hour_of_day_busiest) * 128)
 				f.write('<td style="background-color: rgb(%d, 0, 0)">%d</td>' % (r, hour_of_day[i]))
-				fp.write('%d %d\n' % (i, hour_of_day[i]))
 			else:
 				f.write('<td>0</td>')
-				fp.write('%d 0\n' % i)
-		fp.close()
 		f.write('</tr>\n<tr><th>%</th>')
 		totalcommits = total_commits
 		for i in range(0, 24):
@@ -2982,26 +2986,24 @@ class HTMLReportCreator(ReportCreator):
 			else:
 				f.write('<td>0.00</td>')
 		f.write('</tr></table>')
-		f.write('<img src="hour_of_day.png" alt="Hour of Day">')
-		fg = open(path + '/hour_of_day.dat', 'w')
-		for i in range(0, 24):
-			if i in hour_of_day:
-				fg.write('%d %d\n' % (i + 1, hour_of_day[i]))
-			else:
-				fg.write('%d 0\n' % (i + 1))
-		fg.close()
 
 		# Day of Week
 		f.write(html_header(2, 'Day of Week'))
 		day_of_week = data.getActivityByDayOfWeek()
-		f.write('<div class="vtable"><table>')
-		f.write('<tr><th>Day</th><th>Total (%)</th></tr>')
 		fp = open(path + '/day_of_week.dat', 'w')
 		for d in range(0, 7):
 			commits = 0
 			if d in day_of_week:
 				commits = day_of_week[d]
 			fp.write('%d %s %d\n' % (d + 1, WEEKDAYS[d], commits))
+		fp.close()
+		f.write('<img src="day_of_week.png" alt="Day of Week">')
+		f.write('<div class="vtable"><table>')
+		f.write('<tr><th>Day</th><th>Total (%)</th></tr>')
+		for d in range(0, 7):
+			commits = 0
+			if d in day_of_week:
+				commits = day_of_week[d]
 			f.write('<tr>')
 			f.write('<th>%s</th>' % (WEEKDAYS[d]))
 			if d in day_of_week:
@@ -3011,8 +3013,6 @@ class HTMLReportCreator(ReportCreator):
 				f.write('<td>0</td>')
 			f.write('</tr>')
 		f.write('</table></div>')
-		f.write('<img src="day_of_week.png" alt="Day of Week">')
-		fp.close()
 
 		# Hour of Week
 		f.write(html_header(2, 'Hour of Week'))
@@ -3043,45 +3043,49 @@ class HTMLReportCreator(ReportCreator):
 
 		# Month of Year
 		f.write(html_header(2, 'Month of Year'))
+		fp = open (path + '/month_of_year.dat', 'w')
+		for mm in range(1, 13):
+			commits = 0
+			if mm in data.activity_by_month_of_year:
+				commits = data.activity_by_month_of_year[mm]
+			fp.write('%d %d\n' % (mm, commits))
+		fp.close()
+		f.write('<img src="month_of_year.png" alt="Month of Year">')
 		f.write('<div class="vtable"><table>')
 		f.write('<tr><th>Month</th><th>Commits (%)</th></tr>')
-		fp = open (path + '/month_of_year.dat', 'w')
 		for mm in range(1, 13):
 			commits = 0
 			if mm in data.activity_by_month_of_year:
 				commits = data.activity_by_month_of_year[mm]
 			percent = (100.0 * commits) / total_commits if total_commits else 0.0
 			f.write('<tr><td>%d</td><td>%d (%.2f %%)</td></tr>' % (mm, commits, percent))
-			fp.write('%d %d\n' % (mm, commits))
-		fp.close()
 		f.write('</table></div>')
-		f.write('<img src="month_of_year.png" alt="Month of Year">')
 
 		# Commits by year/month
 		f.write(html_header(2, 'Commits by year/month'))
-		f.write('<div class="vtable"><table><tr><th>Month</th><th>Commits</th><th>Lines added</th><th>Lines removed</th></tr>')
-		for yymm in reversed(sorted(data.commits_by_month.keys())):
-			f.write('<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td></tr>' % (yymm, data.commits_by_month.get(yymm,0), data.lines_added_by_month.get(yymm,0), data.lines_removed_by_month.get(yymm,0)))
-		f.write('</table></div>')
-		f.write('<img src="commits_by_year_month.png" alt="Commits by year/month">')
 		fg = open(path + '/commits_by_year_month.dat', 'w')
 		for yymm in sorted(data.commits_by_month.keys()):
 			fg.write('%s %s\n' % (yymm, data.commits_by_month[yymm]))
 		fg.close()
+		f.write('<img src="commits_by_year_month.png" alt="Commits by year/month">')
+		f.write('<div class="vtable"><table><tr><th>Month</th><th>Commits</th><th>Lines added</th><th>Lines removed</th></tr>')
+		for yymm in reversed(sorted(data.commits_by_month.keys())):
+			f.write('<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td></tr>' % (yymm, data.commits_by_month.get(yymm,0), data.lines_added_by_month.get(yymm,0), data.lines_removed_by_month.get(yymm,0)))
+		f.write('</table></div>')
 
 		# Commits by year
 		f.write(html_header(2, 'Commits by Year'))
+		fg = open(path + '/commits_by_year.dat', 'w')
+		for yy in sorted(data.commits_by_year.keys()):
+			fg.write('%d %d\n' % (yy, data.commits_by_year[yy]))
+		fg.close()
+		f.write('<img src="commits_by_year.png" alt="Commits by Year">')
 		f.write('<div class="vtable"><table><tr><th>Year</th><th>Commits (% of all)</th><th>Lines added</th><th>Lines removed</th></tr>')
 		for yy in reversed(sorted(data.commits_by_year.keys())):
 			commits = data.commits_by_year.get(yy, 0)
 			percent = (100.0 * commits) / total_commits if total_commits else 0.0
 			f.write('<tr><td>%s</td><td>%d (%.2f%%)</td><td>%d</td><td>%d</td></tr>' % (yy, commits, percent, data.lines_added_by_year.get(yy,0), data.lines_removed_by_year.get(yy,0)))
 		f.write('</table></div>')
-		f.write('<img src="commits_by_year.png" alt="Commits by Year">')
-		fg = open(path + '/commits_by_year.dat', 'w')
-		for yy in sorted(data.commits_by_year.keys()):
-			fg.write('%d %d\n' % (yy, data.commits_by_year[yy]))
-		fg.close()
 
 		# Commits by timezone
 		f.write(html_header(2, 'Commits by Timezone'))
@@ -3094,17 +3098,12 @@ class HTMLReportCreator(ReportCreator):
 			r = 127 + int((float(commits) / max_commits_on_tz) * 128)
 			f.write('<tr><th>%s</th><td style="background-color: rgb(%d, 0, 0)">%d</td></tr>' % (i, r, commits))
 		f.write('</table>')
-
-		f.write('</body></html>')
-		f.close()
+		f.write('</div>  <!-- end activity section -->')
 
 		###
-		# Authors
-		f = open(path + '/authors.html', 'w')
-		self.printHeader(f)
-
-		f.write('<h1>Authors</h1>')
-		self.printNav(f)
+		# Authors section
+		f.write('<div id="authors" class="section">')
+		f.write(html_header(2, 'Authors'))
 
 		# Authors :: List of authors
 		f.write(html_header(2, 'List of Authors'))
@@ -3192,8 +3191,6 @@ class HTMLReportCreator(ReportCreator):
 		f.write(html_header(2, 'Commits by Domains'))
 		domains_by_commits = getkeyssortedbyvaluekey(data.domains, 'commits')
 		domains_by_commits.reverse() # most first
-		f.write('<div class="vtable"><table>')
-		f.write('<tr><th>Domains</th><th>Total (%)</th></tr>')
 		fp = open(path + '/domains.dat', 'w')
 		n = 0
 		for domain in domains_by_commits:
@@ -3203,21 +3200,26 @@ class HTMLReportCreator(ReportCreator):
 			n += 1
 			info = data.getDomainInfo(domain)
 			fp.write('%s %d %d\n' % (domain, n , info['commits']))
+		fp.close()
+		f.write('<img src="domains.png" alt="Commits by Domains">')
+		f.write('<div class="vtable"><table>')
+		f.write('<tr><th>Domains</th><th>Total (%)</th></tr>')
+		n = 0
+		for domain in domains_by_commits:
+			if n == conf['max_domains']:
+				break
+			commits = 0
+			n += 1
+			info = data.getDomainInfo(domain)
 			percent = (100.0 * info['commits'] / total_commits) if total_commits else 0.0
 			f.write('<tr><th>%s</th><td>%d (%.2f%%)</td></tr>' % (domain, info['commits'], percent))
 		f.write('</table></div>')
-		f.write('<img src="domains.png" alt="Commits by Domains">')
-		fp.close()
-
-		f.write('</body></html>')
-		f.close()
+		f.write('</div>  <!-- end authors section -->')
 
 		###
-		# Branches
-		f = open(path + '/branches.html', 'w')
-		self.printHeader(f)
-		f.write('<h1>Branches</h1>')
-		self.printNav(f)
+		# Branches section
+		f.write('<div id="branches" class="section">')
+		f.write(html_header(2, 'Branches'))
 
 		# Branch summary
 		branches = data.getBranches() if hasattr(data, 'getBranches') else {}
@@ -3313,16 +3315,12 @@ class HTMLReportCreator(ReportCreator):
 					row += '<td>%d</td></tr>' % branch_count
 					f.write(row)
 				f.write('</table>')
-
-		f.write('</body></html>')
-		f.close()
+		f.write('</div>  <!-- end branches section -->')
 
 		###
-		# Files
-		f = open(path + '/files.html', 'w')
-		self.printHeader(f)
-		f.write('<h1>Files</h1>')
-		self.printNav(f)
+		# Files section
+		f.write('<div id="files" class="section">')
+		f.write(html_header(2, 'Files'))
 
 		f.write('<dl>\n')
 		f.write('<dt>Total files</dt><dd>%d</dd>' % data.getTotalFiles())
@@ -3430,15 +3428,12 @@ class HTMLReportCreator(ReportCreator):
 		except (AttributeError, TypeError):
 			pass
 
-		f.write('</body></html>')
-		f.close()
+		f.write('</div>  <!-- end files section -->')
 
 		###
-		# Lines
-		f = open(path + '/lines.html', 'w')
-		self.printHeader(f)
-		f.write('<h1>Lines</h1>')
-		self.printNav(f)
+		# Lines section
+		f.write('<div id="lines" class="section">')
+		f.write(html_header(2, 'Lines'))
 
 		f.write('<dl>\n')
 		f.write('<dt>Total lines</dt><dd>%d</dd>' % data.getTotalLOC())
@@ -3496,15 +3491,12 @@ class HTMLReportCreator(ReportCreator):
 		else:
 			f.write('<p>No SLOC data available.</p>')
 
-		f.write('</body></html>')
-		f.close()
+		f.write('</div>  <!-- end lines section -->')
 
 		###
-		# tags.html
-		f = open(path + '/tags.html', 'w')
-		self.printHeader(f)
-		f.write('<h1>Tags</h1>')
-		self.printNav(f)
+		# Tags section
+		f.write('<div id="tags" class="section">')
+		f.write(html_header(2, 'Tags'))
 
 		f.write('<dl>')
 		f.write('<dt>Total tags</dt><dd>%d</dd>' % len(data.tags))
@@ -3523,7 +3515,9 @@ class HTMLReportCreator(ReportCreator):
 				authorinfo.append('%s (%d)' % (i, data.tags[tag]['authors'][i]))
 			f.write('<tr><td>%s</td><td>%s</td><td>%d</td><td>%s</td></tr>' % (tag, data.tags[tag]['date'], data.tags[tag]['commits'], ', '.join(authorinfo)))
 		f.write('</table>')
+		f.write('</div>  <!-- end tags section -->')
 
+		# Close the combined HTML file
 		f.write('</body></html>')
 		f.close()
 
@@ -3655,6 +3649,190 @@ class HTMLReportCreator(ReportCreator):
 </head>
 <body>
 """ % (self.title, conf['style'], getversion()))
+
+	def printCombinedHeader(self, f):
+		# Read CSS content
+		css_content = ""
+		binarypath = os.path.dirname(os.path.abspath(__file__))
+		css_path = os.path.join(binarypath, 'gitstats.css')
+		try:
+			with open(css_path, 'r') as css_file:
+				css_content = css_file.read()
+		except FileNotFoundError:
+			print(f'Warning: CSS file not found at {css_path}')
+
+		# Read JavaScript content  
+		js_content = ""
+		js_path = os.path.join(binarypath, 'sortable.js')
+		try:
+			with open(js_path, 'r') as js_file:
+				js_content = js_file.read()
+		except FileNotFoundError:
+			print(f'Warning: JavaScript file not found at {js_path}')
+
+		f.write(
+"""<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>GitStats - %s</title>
+	<meta name="generator" content="GitStats %s">
+	<style type="text/css">
+%s
+	.section {
+		margin-bottom: 2em;
+	}
+	
+	/* Print styles - ensure everything prints including backgrounds */
+	@media print {
+		* {
+			-webkit-print-color-adjust: exact !important;
+			color-adjust: exact !important;
+			print-color-adjust: exact !important;
+		}
+		
+		body {
+			background-color: #dfd !important;
+			color: black !important;
+		}
+		
+		table {
+			border: 1px solid black !important;
+			border-collapse: collapse !important;
+			page-break-inside: avoid;
+		}
+		
+		td, th {
+			border: 1px solid black !important;
+			padding: 0.2em !important;
+			background-color: white !important;
+		}
+		
+		th {
+			background-color: #ddf !important;
+		}
+		
+		tr:hover {
+			background-color: #ddf !important;
+		}
+		
+		h2 {
+			background-color: #564 !important;
+			border: 1px solid black !important;
+			color: white !important;
+			page-break-after: avoid;
+		}
+		
+		.nav {
+			border-bottom: 1px solid black !important;
+			background-color: #dfd !important;
+		}
+		
+		.nav li a {
+			background-color: #ddf !important;
+			border: 1px solid black !important;
+			color: black !important;
+		}
+		
+		/* Preserve colored table cells */
+		td[style*="background-color"] {
+			-webkit-print-color-adjust: exact !important;
+			color-adjust: exact !important;
+			print-color-adjust: exact !important;
+		}
+		
+		/* Branch-specific styles for printing */
+		.branches tr.unmerged {
+			background-color: #ffd0d0 !important;
+		}
+		
+		.unmerged-branches {
+			border: 2px solid #ff6666 !important;
+		}
+		
+		.unmerged-branches th {
+			background-color: #ffcccc !important;
+		}
+		
+		/* Team performance tables */
+		.team-performance th {
+			background-color: #564 !important;
+			color: white !important;
+		}
+		
+		.working-patterns th {
+			background-color: #446 !important;
+			color: white !important;
+		}
+		
+		.impact-analysis th {
+			background-color: #644 !important;
+			color: white !important;
+		}
+		
+		.collaboration th {
+			background-color: #464 !important;
+			color: white !important;
+		}
+		
+		/* Highlight high performers */
+		tr.high-performer {
+			background-color: #e6ffe6 !important;
+		}
+		
+		/* Highlight concerning patterns */
+		tr.concern {
+			background-color: #ffe6e6 !important;
+		}
+		
+		/* Preserve chart bar colors */
+		div[style*="background-color: red"] {
+			background-color: red !important;
+			-webkit-print-color-adjust: exact !important;
+			color-adjust: exact !important;
+			print-color-adjust: exact !important;
+		}
+		
+		/* Images should fit on page */
+		img {
+			max-width: 100%% !important;
+			height: auto !important;
+		}
+		
+		/* Ensure sections start on new page if needed */
+		.section {
+			page-break-before: auto;
+			margin-bottom: 2em !important;
+		}
+		
+		/* Prevent page breaks inside important elements */
+		table, .section h2, dl {
+			page-break-inside: avoid;
+		}
+	}
+	</style>
+	<script type="text/javascript">
+%s
+	</script>
+</head>
+<body>
+""" % (self.title, getversion(), css_content, js_content))
+
+	def printCombinedNav(self, f):
+		f.write("""
+<div class="nav">
+<ul>
+<li><a href="#general">General</a></li>
+<li><a href="#activity">Activity</a></li>
+<li><a href="#authors">Authors</a></li>
+<li><a href="#team_analysis">Team Analysis</a></li>
+<li><a href="#branches">Branches</a></li>
+<li><a href="#files">Files</a></li>
+<li><a href="#lines">Lines</a></li>
+<li><a href="#tags">Tags</a></li>
+</ul>
+</div>
+""")
 
 	def printNav(self, f):
 		f.write("""
