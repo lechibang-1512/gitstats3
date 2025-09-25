@@ -329,6 +329,36 @@ class MatplotlibChartGenerator:
 			
 		except Exception as e:
 			print(f"Warning: Failed to create files_by_date chart: {e}")
+
+	def create_files_by_year_chart(self, data_file, output_path):
+		"""Create files by year chart."""
+		try:
+			# Read data file
+			years = []
+			files = []
+			with open(data_file, 'r') as f:
+				for line in f:
+					parts = line.strip().split()
+					if len(parts) >= 2:
+						years.append(int(parts[0]))
+						files.append(int(parts[1]))
+			
+			if not years:
+				return
+			
+			fig, ax = self._setup_figure()
+			
+			# Create bar chart
+			bars = ax.bar(years, files, width=0.8, color='#4472C4', alpha=0.7)
+			
+			ax.set_xlabel('Year')
+			ax.set_ylabel('Files')
+			ax.set_ylim(0, max(files) * 1.1 if files else 1)
+			
+			self._save_figure(fig, output_path)
+			
+		except Exception as e:
+			print(f"Warning: Failed to create files_by_year chart: {e}")
 	
 	def create_lines_of_code_chart(self, data_file, output_path):
 		"""Create lines of code chart."""
@@ -835,6 +865,56 @@ class DataCollector:
 		
 		# File size and revision tracking
 		self.file_sizes = {} # filepath -> size in bytes
+		
+		# Enhanced Metrics - College Project Consolidation
+		# 1. Documentation Quality Metrics (12% weight - highest priority)
+		self.documentation_metrics = {
+			'total_comment_lines': 0,
+			'total_documentation_files': 0,
+			'api_documented_functions': 0,
+			'total_functions': 0,
+			'readme_sections': 0,
+			'inline_comments': 0,
+			'docstring_coverage': 0.0
+		}
+		
+		# 2. Code Quality Metrics (SonarQube-inspired)
+		self.code_quality_metrics = {
+			'cyclomatic_complexity': 0,
+			'code_duplication_lines': 0,
+			'technical_debt_minutes': 0,
+			'maintainability_index': 0.0,
+			'code_smells': 0,
+			'security_hotspots': 0
+		}
+		
+		# 3. Team Collaboration Metrics (Enhanced)
+		self.collaboration_metrics = {
+			'bus_factor': 0,
+			'knowledge_concentration': {},  # file -> primary_authors
+			'pair_programming_commits': 0,
+			'review_coverage': 0.0,
+			'cross_team_commits': 0,
+			'mentorship_pairs': {}
+		}
+		
+		# 4. Project Health Metrics
+		self.project_health = {
+			'overall_health_score': 0.0,
+			'trend_direction': 'stable',  # improving/declining/stable
+			'risk_level': 'low',  # low/medium/high
+			'actionable_issues': [],
+			'quality_gate_status': 'unknown'
+		}
+		
+		# 5. Enhanced File Analysis
+		self.file_analysis = {
+			'file_types': defaultdict(int),
+			'large_files': [],  # files > 500 LOC
+			'complex_files': [],  # high complexity files
+			'orphaned_files': [],  # files with single contributor
+			'hot_files': []  # frequently modified files
+		}
 		self.file_revisions = {} # filepath -> revision count
 
 		# Directory activity tracking
@@ -860,6 +940,8 @@ class DataCollector:
 		
 		# Pace of Changes tracking (number of line changes happening over time)
 		self.pace_of_changes = {} # stamp -> total_line_changes (ins + del)
+		self.pace_of_changes_by_month = defaultdict(int) # month -> total_line_changes (ins + del)
+		self.pace_of_changes_by_year = defaultdict(int) # year -> total_line_changes (ins + del)
 		
 		# Last 30 days activity
 		self.last_30_days_commits = 0
@@ -870,6 +952,16 @@ class DataCollector:
 		self.last_12_months_commits = defaultdict(int) # month -> commits
 		self.last_12_months_lines_added = defaultdict(int) # month -> lines added
 		self.last_12_months_lines_removed = defaultdict(int) # month -> lines removed
+		
+		# File count tracking by year  
+		self.files_by_year = defaultdict(int) # year -> max_file_count
+		
+		# Lines of code tracking by year
+		self.lines_of_code_by_year = defaultdict(int) # year -> total_lines
+		
+		# Author yearly data
+		self.lines_added_by_author_by_year = defaultdict(lambda: defaultdict(int)) # year -> author -> lines_added
+		self.commits_by_author_by_year = defaultdict(lambda: defaultdict(int)) # year -> author -> commits
 		
 		# Repository size tracking
 		self.repository_size_mb = 0.0
@@ -967,6 +1059,223 @@ class DataCollector:
 	
 	def getStampCreated(self):
 		return self.stamp_created
+	
+	# Enhanced Metrics Calculation Methods - College Project Implementation
+	
+	def calculate_documentation_quality(self):
+		"""Calculate documentation quality metrics (12% weight priority)"""
+		if self.total_lines == 0:
+			return 0.0
+			
+		comment_density = (self.documentation_metrics['total_comment_lines'] / self.total_lines) * 100
+		
+		# API documentation coverage
+		if self.documentation_metrics['total_functions'] > 0:
+			api_coverage = (self.documentation_metrics['api_documented_functions'] / 
+						   self.documentation_metrics['total_functions']) * 100
+		else:
+			api_coverage = 0
+		
+		# README quality (basic assessment)
+		readme_score = min(self.documentation_metrics['readme_sections'] * 20, 100)
+		
+		# Weighted documentation score
+		doc_score = (comment_density * 0.4 + api_coverage * 0.4 + readme_score * 0.2)
+		
+		return min(doc_score, 100.0)
+	
+	def calculate_bus_factor(self):
+		"""Calculate knowledge distribution risk (Bus Factor)"""
+		if not self.authors:
+			return 0
+			
+		# Sort authors by commit count
+		author_commits = [(author, data['commits']) for author, data in self.authors.items()]
+		author_commits.sort(key=lambda x: x[1], reverse=True)
+		
+		total_commits = sum(commits for _, commits in author_commits)
+		if total_commits == 0:
+			return 0
+		
+		# Calculate cumulative percentage
+		cumulative = 0
+		bus_factor = 0
+		
+		for author, commits in author_commits:
+			cumulative += commits
+			bus_factor += 1
+			# If top N authors have >50% of commits, that's the bus factor
+			if (cumulative / total_commits) >= 0.5:
+				break
+				
+		return bus_factor
+	
+	def calculate_code_quality_score(self):
+		"""Calculate overall code quality using industry standards"""
+		scores = []
+		
+		# Complexity score (lower is better)
+		if self.total_files > 0:
+			avg_complexity = self.code_quality_metrics['cyclomatic_complexity'] / self.total_files
+			complexity_score = max(0, 100 - (avg_complexity - 10) * 10)  # Penalize complexity > 10
+			scores.append(complexity_score)
+		
+		# Documentation score
+		doc_score = self.calculate_documentation_quality()
+		scores.append(doc_score)
+		
+		# Team collaboration score
+		bus_factor = self.calculate_bus_factor()
+		collaboration_score = min(bus_factor * 25, 100)  # Higher bus factor = better
+		scores.append(collaboration_score)
+		
+		# File organization score
+		if self.total_files > 0:
+			large_files_ratio = len(self.file_analysis['large_files']) / self.total_files
+			file_org_score = max(0, 100 - (large_files_ratio * 100))
+			scores.append(file_org_score)
+		
+		# Calculate weighted average
+		if scores:
+			return sum(scores) / len(scores)
+		return 0.0
+	
+	def analyze_file_complexity(self, filepath):
+		"""Basic complexity analysis for a file"""
+		try:
+			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+				content = f.read()
+			
+			# Simple complexity indicators
+			complexity = 0
+			lines = content.split('\n')
+			
+			for line in lines:
+				line = line.strip()
+				# Count control structures (basic cyclomatic complexity)
+				if any(keyword in line for keyword in ['if ', 'elif ', 'else:', 'for ', 'while ', 'try:', 'except', 'case ', 'switch']):
+					complexity += 1
+				# Count function definitions
+				if line.startswith('def ') or line.startswith('function ') or 'function(' in line:
+					self.documentation_metrics['total_functions'] += 1
+					# Check for docstring/comments after function
+					if '"""' in content or "'''" in content or '/*' in content:
+						self.documentation_metrics['api_documented_functions'] += 1
+			
+			return complexity
+			
+		except Exception:
+			return 0
+	
+	def update_enhanced_metrics(self, filepath):
+		"""Update enhanced metrics for a given file"""
+		try:
+			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+				content = f.read()
+				lines = content.split('\n')
+			
+			# File type analysis
+			ext = os.path.splitext(filepath)[1].lower()
+			self.file_analysis['file_types'][ext] += 1
+			
+			# Large files detection (>500 LOC)
+			if len(lines) > 500:
+				self.file_analysis['large_files'].append(filepath)
+			
+			# Documentation analysis
+			comment_lines = 0
+			for line in lines:
+				line = line.strip()
+				if line.startswith('#') or line.startswith('//') or line.startswith('*') or line.startswith('/*'):
+					comment_lines += 1
+				if '"""' in line or "'''" in line:
+					comment_lines += 1
+			
+			self.documentation_metrics['total_comment_lines'] += comment_lines
+			
+			# Complexity analysis
+			complexity = self.analyze_file_complexity(filepath)
+			self.code_quality_metrics['cyclomatic_complexity'] += complexity
+			
+			if complexity > 20:  # High complexity threshold
+				self.file_analysis['complex_files'].append(filepath)
+			
+		except Exception as e:
+			pass  # Skip files that can't be read
+	
+	def calculate_project_health_score(self):
+		"""Calculate overall project health score for college project"""
+		scores = {}
+		
+		# 1. Documentation Quality (12% weight)
+		scores['documentation'] = self.calculate_documentation_quality() * 0.12
+		
+		# 2. Code Quality (20% weight)
+		scores['code_quality'] = self.calculate_code_quality_score() * 0.20
+		
+		# 3. Team Collaboration (15% weight) 
+		bus_factor = self.calculate_bus_factor()
+		collaboration_score = min(bus_factor * 20, 100)  # Scale bus factor
+		scores['collaboration'] = collaboration_score * 0.15
+		
+		# 4. Project Activity (10% weight)
+		if self.total_commits > 0:
+			# More commits in recent period = better activity
+			activity_score = min((self.total_commits / 10) * 10, 100)
+		else:
+			activity_score = 0
+		scores['activity'] = activity_score * 0.10
+		
+		# 5. File Organization (8% weight)
+		if self.total_files > 0:
+			large_files_penalty = len(self.file_analysis['large_files']) / self.total_files
+			org_score = max(0, 100 - (large_files_penalty * 50))
+		else:
+			org_score = 50
+		scores['organization'] = org_score * 0.08
+		
+		# 6. Basic Technical Metrics (35% weight - remaining)
+		if self.total_lines > 0:
+			lines_per_commit = self.total_lines / max(self.total_commits, 1)
+			# Reasonable lines per commit (not too high, not too low)
+			technical_score = max(0, 100 - abs(lines_per_commit - 50))
+		else:
+			technical_score = 50
+		scores['technical'] = technical_score * 0.35
+		
+		# Calculate total
+		total_score = sum(scores.values())
+		
+		# Update project health
+		self.project_health['overall_health_score'] = total_score
+		
+		# Set risk level
+		if total_score >= 80:
+			self.project_health['risk_level'] = 'low'
+			self.project_health['quality_gate_status'] = 'passed'
+		elif total_score >= 60:
+			self.project_health['risk_level'] = 'medium' 
+			self.project_health['quality_gate_status'] = 'warning'
+		else:
+			self.project_health['risk_level'] = 'high'
+			self.project_health['quality_gate_status'] = 'failed'
+		
+		# Generate actionable recommendations
+		self.project_health['actionable_issues'] = []
+		
+		if scores['documentation'] < 10:
+			self.project_health['actionable_issues'].append('Improve code documentation and comments')
+		
+		if scores['collaboration'] < 10:
+			self.project_health['actionable_issues'].append('Increase team collaboration - current bus factor too low')
+		
+		if len(self.file_analysis['large_files']) > 5:
+			self.project_health['actionable_issues'].append('Consider breaking down large files (>500 LOC)')
+		
+		if len(self.file_analysis['complex_files']) > 3:
+			self.project_health['actionable_issues'].append('Reduce complexity in identified complex files')
+		
+		return total_score
 	
 	def getTags(self):
 		return []
@@ -1193,13 +1502,22 @@ class GitDataCollector(DataCollector):
 				continue
 			(stamp, files) = parts[0:2]
 			try:
-				self.files_by_stamp[int(stamp)] = int(files)
+				timestamp = int(stamp)
+				file_count = int(files)
+				self.files_by_stamp[timestamp] = file_count
+				
+				# Track files by year (use max file count per year)
+				date = datetime.datetime.fromtimestamp(timestamp)
+				year = date.year
+				if year not in self.files_by_year or file_count > self.files_by_year[year]:
+					self.files_by_year[year] = file_count
 			except ValueError:
 				print('Warning: failed to parse line "%s"' % line)
 
 		# extensions and size of files
 		lines = getpipeoutput(['git ls-tree -r -l -z %s' % getcommitrange('HEAD', end_only = True)]).split('\000')
 		blobs_to_read = []
+		all_blobs_for_sloc = []  # All blobs for SLOC analysis, regardless of cache status
 		for line in lines:
 			if len(line) == 0:
 				continue
@@ -1227,6 +1545,10 @@ class GitDataCollector(DataCollector):
 			if ext not in self.extensions:
 				self.extensions[ext] = {'files': 0, 'lines': 0}
 			self.extensions[ext]['files'] += 1
+			
+			# Add all blobs to SLOC analysis list (regardless of cache status)
+			all_blobs_for_sloc.append((ext, blob_id))
+			
 			#if cache empty then add ext and blob id to list of new blob's
 			#otherwise try to read needed info from cache
 			if 'lines_in_blob' not in self.cache:
@@ -1243,9 +1565,9 @@ class GitDataCollector(DataCollector):
 		pool.terminate()
 		pool.join()
 
-		# Also get SLOC analysis for the same blobs
+		# Also get SLOC analysis for ALL blobs (not just uncached ones)
 		pool = Pool(processes=conf['processes'])
-		ext_blob_sloc = pool.map(analyzesloc, blobs_to_read)
+		ext_blob_sloc = pool.map(analyzesloc, all_blobs_for_sloc)
 		pool.terminate()
 		pool.join()
 
@@ -1272,6 +1594,9 @@ class GitDataCollector(DataCollector):
 			self.total_source_lines += source_lines
 			self.total_comment_lines += comment_lines
 			self.total_blank_lines += blank_lines
+			
+			# Update enhanced documentation metrics
+			self.documentation_metrics['total_comment_lines'] += comment_lines
 
 		# File revision counting
 		print('Collecting file revision statistics...')
@@ -1359,6 +1684,12 @@ class GitDataCollector(DataCollector):
 
 						date = datetime.datetime.fromtimestamp(stamp)
 						
+						# Track pace of changes by month and year
+						yymm = date.strftime('%Y-%m')
+						yy = date.year
+						self.pace_of_changes_by_month[yymm] += inserted + deleted
+						self.pace_of_changes_by_year[yy] += inserted + deleted
+						
 						# Track last 30 days activity
 						import time as time_mod
 						now = time_mod.time()
@@ -1441,6 +1772,12 @@ class GitDataCollector(DataCollector):
 							self.changes_by_date_by_author[stamp][author] = {}
 						self.changes_by_date_by_author[stamp][author]['lines_added'] = self.authors[author]['lines_added']
 						self.changes_by_date_by_author[stamp][author]['commits'] = self.authors[author]['commits']
+						
+						# Track author data by year
+						date = datetime.datetime.fromtimestamp(stamp)
+						year = date.year
+						self.lines_added_by_author_by_year[year][author] += inserted
+						self.commits_by_author_by_year[year][author] += 1
 						files, inserted, deleted = 0, 0, 0
 					except ValueError:
 						print('Warning: unexpected line "%s"' % line)
@@ -1664,7 +2001,8 @@ class GitDataCollector(DataCollector):
 		
 		try:
 			# Get commit details with files changed
-			commit_data = getpipeoutput(['git log --name-only --pretty=format:"COMMIT:%H:%aN:%at" %s' % getlogrange('HEAD')]).split('\n')
+			log_range = getlogrange('HEAD')
+			commit_data = getpipeoutput(['git log --name-only --pretty=format:"COMMIT:%%H:%%aN:%%at" %s' % log_range]).split('\n')
 			
 			current_commit = None
 			current_author = None
@@ -1707,6 +2045,52 @@ class GitDataCollector(DataCollector):
 		except Exception as e:
 			if conf['debug']:
 				print(f'Warning: Team collaboration analysis failed: {e}')
+		
+		# Enhanced Metrics Collection - College Project Implementation
+		print('Calculating enhanced metrics...')
+		
+		# Analyze current files for enhanced metrics
+		try:
+			# Get list of all tracked files
+			files_output = getpipeoutput(['git ls-files'])
+			if files_output.strip():
+				tracked_files = files_output.strip().split('\n')
+				
+				# Analyze each file for documentation and complexity
+				for filepath in tracked_files[:100]:  # Limit to first 100 files for performance
+					if os.path.exists(filepath):
+						self.update_enhanced_metrics(filepath)
+				
+				# Check for README and documentation files
+				readme_files = [f for f in tracked_files if 'readme' in f.lower() or 'doc' in f.lower()]
+				self.documentation_metrics['readme_sections'] = len(readme_files) * 5  # Basic scoring
+				
+				# Count documentation files
+				doc_extensions = ['.md', '.txt', '.rst', '.doc']
+				self.documentation_metrics['total_documentation_files'] = sum(
+					1 for f in tracked_files 
+					if any(f.lower().endswith(ext) for ext in doc_extensions)
+				)
+		
+		except Exception as e:
+			if conf['debug']:
+				print(f'Warning: Enhanced file analysis failed: {e}')
+		
+		# Calculate final project health score
+		try:
+			health_score = self.calculate_project_health_score()
+			print(f'Project Health Score: {health_score:.1f}/100')
+			print(f'Quality Gate Status: {self.project_health["quality_gate_status"]}')
+			print(f'Risk Level: {self.project_health["risk_level"]}')
+			
+			if self.project_health['actionable_issues']:
+				print('Actionable Issues:')
+				for issue in self.project_health['actionable_issues']:
+					print(f'  - {issue}')
+		
+		except Exception as e:
+			if conf['debug']:
+				print(f'Warning: Health score calculation failed: {e}')
 	
 	def _analyzeCommitPatterns(self):
 		"""Analyze commit patterns to identify commit behavior (small vs large commits, frequency, etc.)"""
@@ -1714,8 +2098,9 @@ class GitDataCollector(DataCollector):
 			print('Analyzing commit patterns...')
 		
 		try:
-			# Get detailed commit information
-			commit_lines = getpipeoutput(['git log --shortstat --pretty=format:"COMMIT:%H:%aN:%at:%s" %s' % getlogrange('HEAD')]).split('\n')
+			# Get detailed commit information using a simpler, more reliable approach
+			log_range = getlogrange('HEAD')
+			commit_lines = getpipeoutput(['git log --shortstat --pretty=format:"COMMIT:%%H:%%aN:%%at:%%s" %s' % log_range]).split('\n')
 			
 			current_author = None
 			current_timestamp = None
@@ -1731,12 +2116,12 @@ class GitDataCollector(DataCollector):
 						current_author = parts[2]
 						try:
 							current_timestamp = int(parts[3])
-							current_message = parts[4]
-						except ValueError:
+							current_message = parts[4] if len(parts) > 4 else ""
+						except (ValueError, IndexError):
 							current_timestamp = None
 							current_message = ""
 				elif line and current_author and re.search(r'files? changed', line):
-					# Parse shortstat line
+					# Parse shortstat line: "1 file changed, 269 insertions(+), 91 deletions(-)"
 					numbers = re.findall(r'\d+', line)
 					if len(numbers) >= 1:
 						files_changed = int(numbers[0])
@@ -1750,7 +2135,7 @@ class GitDataCollector(DataCollector):
 							'lines_changed': total_changes,
 							'insertions': insertions,
 							'deletions': deletions,
-							'message': current_message
+							'message': current_message if current_message else ""
 						}
 						author_commits[current_author].append(commit_info)
 			
@@ -1812,7 +2197,8 @@ class GitDataCollector(DataCollector):
 		
 		try:
 			# Get commit timestamps with timezone info
-			commit_lines = getpipeoutput(['git log --pretty=format:"%aN|%at|%ai|%s" %s' % getlogrange('HEAD')]).split('\n')
+			log_range = getlogrange('HEAD')
+			commit_lines = getpipeoutput(['git log --pretty=format:"%%aN|%%at|%%ai|%%s" %s' % log_range]).split('\n')
 			
 			for line in commit_lines:
 				if not line.strip():
@@ -1955,7 +2341,8 @@ class GitDataCollector(DataCollector):
 			file_change_count = defaultdict(int)
 			
 			# Get file change history
-			log_lines = getpipeoutput(['git log --name-only --pretty=format:"AUTHOR:%aN" %s' % getlogrange('HEAD')]).split('\n')
+			log_range = getlogrange('HEAD')
+			log_lines = getpipeoutput(['git log --name-only --pretty=format:"AUTHOR:%%aN" %s' % log_range]).split('\n')
 			current_author = None
 			
 			for line in log_lines:
@@ -2251,6 +2638,30 @@ class GitDataCollector(DataCollector):
 	def getPaceOfChanges(self):
 		"""Get pace of changes (line changes over time)."""
 		return self.pace_of_changes
+	
+	def getPaceOfChangesByMonth(self):
+		"""Get pace of changes by month."""
+		return dict(self.pace_of_changes_by_month)
+	
+	def getPaceOfChangesByYear(self):
+		"""Get pace of changes by year."""
+		return dict(self.pace_of_changes_by_year)
+	
+	def getFilesByYear(self):
+		"""Get file count by year."""
+		return dict(self.files_by_year)
+	
+	def getLinesOfCodeByYear(self):
+		"""Get lines of code by year."""
+		return dict(self.lines_of_code_by_year)
+	
+	def getLinesAddedByAuthorByYear(self):
+		"""Get lines added by author by year."""
+		return dict(self.lines_added_by_author_by_year)
+	
+	def getCommitsByAuthorByYear(self):
+		"""Get commits by author by year."""
+		return dict(self.commits_by_author_by_year)
 	
 	def getRepositorySize(self):
 		"""Get repository size in MB."""
@@ -2562,6 +2973,99 @@ class HTMLReportCreator(ReportCreator):
 		
 		f.write('</dl>')
 		f.write('</div>  <!-- end general section -->')
+
+		###
+		# Project Health - Enhanced Metrics for College Project
+		f.write('<div id="project_health" class="section">')
+		f.write(html_header(2, 'Project Health Dashboard'))
+		
+		# Overall Health Score
+		health_score = data.project_health.get('overall_health_score', 0)
+		risk_level = data.project_health.get('risk_level', 'unknown')
+		quality_gate = data.project_health.get('quality_gate_status', 'unknown')
+		
+		f.write('<dl>')
+		f.write('<dt>Overall Health Score</dt><dd><strong>%.1f/100</strong></dd>' % health_score)
+		
+		# Color-code risk level
+		risk_color = {'low': 'green', 'medium': 'orange', 'high': 'red'}.get(risk_level, 'gray')
+		f.write('<dt>Risk Level</dt><dd><span style="color: %s; font-weight: bold;">%s</span></dd>' % (risk_color, risk_level.upper()))
+		
+		# Quality Gate Status
+		gate_color = {'passed': 'green', 'warning': 'orange', 'failed': 'red'}.get(quality_gate, 'gray')
+		f.write('<dt>Quality Gate</dt><dd><span style="color: %s; font-weight: bold;">%s</span></dd>' % (gate_color, quality_gate.upper()))
+		f.write('</dl>')
+		
+		# Documentation Quality Metrics
+		f.write('<h3>Documentation Quality</h3>')
+		doc_metrics = data.documentation_metrics
+		f.write('<dl>')
+		f.write('<dt>Comment Density</dt><dd>%.1f lines</dd>' % doc_metrics.get('total_comment_lines', 0))
+		f.write('<dt>Documentation Files</dt><dd>%d</dd>' % doc_metrics.get('total_documentation_files', 0))
+		f.write('<dt>Functions Documented</dt><dd>%d/%d</dd>' % (
+			doc_metrics.get('api_documented_functions', 0),
+			doc_metrics.get('total_functions', 0)
+		))
+		doc_quality_score = data.calculate_documentation_quality()
+		f.write('<dt>Documentation Score</dt><dd><strong>%.1f/100</strong></dd>' % doc_quality_score)
+		f.write('</dl>')
+		
+		# Code Quality Metrics
+		f.write('<h3>Code Quality</h3>')
+		code_metrics = data.code_quality_metrics
+		f.write('<dl>')
+		f.write('<dt>Cyclomatic Complexity</dt><dd>%d total</dd>' % code_metrics.get('cyclomatic_complexity', 0))
+		if data.total_files > 0:
+			avg_complexity = code_metrics.get('cyclomatic_complexity', 0) / data.total_files
+			f.write('<dt>Average Complexity per File</dt><dd>%.1f</dd>' % avg_complexity)
+		f.write('<dt>Large Files (>500 LOC)</dt><dd>%d</dd>' % len(data.file_analysis.get('large_files', [])))
+		f.write('<dt>Complex Files (>20 complexity)</dt><dd>%d</dd>' % len(data.file_analysis.get('complex_files', [])))
+		code_quality_score = data.calculate_code_quality_score()
+		f.write('<dt>Code Quality Score</dt><dd><strong>%.1f/100</strong></dd>' % code_quality_score)
+		f.write('</dl>')
+		
+		# Team Collaboration Metrics  
+		f.write('<h3>Team Collaboration</h3>')
+		bus_factor = data.calculate_bus_factor()
+		f.write('<dl>')
+		f.write('<dt>Bus Factor</dt><dd><strong>%d</strong> (minimum contributors for 50%% of work)</dd>' % bus_factor)
+		
+		if bus_factor <= 2:
+			bus_warning = '<span style="color: red;">⚠ High risk - very few contributors</span>'
+		elif bus_factor <= 4:
+			bus_warning = '<span style="color: orange;">⚠ Medium risk - limited contributor diversity</span>'
+		else:
+			bus_warning = '<span style="color: green;">✓ Good contributor diversity</span>'
+		f.write('<dt>Risk Assessment</dt><dd>%s</dd>' % bus_warning)
+		f.write('</dl>')
+		
+		# File Analysis
+		f.write('<h3>File Analysis</h3>')
+		file_analysis = data.file_analysis
+		f.write('<dl>')
+		
+		# Top file types
+		file_types = file_analysis.get('file_types', {})
+		if file_types:
+			top_types = sorted(file_types.items(), key=lambda x: x[1], reverse=True)[:5]
+			f.write('<dt>Top File Types</dt><dd>')
+			for ext, count in top_types:
+				ext_display = ext if ext else '(no extension)'
+				f.write('%s: %d files<br>' % (ext_display, count))
+			f.write('</dd>')
+		
+		f.write('</dl>')
+		
+		# Actionable Issues
+		issues = data.project_health.get('actionable_issues', [])
+		if issues:
+			f.write('<h3>Actionable Issues</h3>')
+			f.write('<ul>')
+			for issue in issues:
+				f.write('<li>%s</li>' % issue)
+			f.write('</ul>')
+		
+		f.write('</div>  <!-- end project health section -->')
 
 		###
 		# Team Analysis - New comprehensive team analysis section
@@ -2922,6 +3426,39 @@ class HTMLReportCreator(ReportCreator):
 		else:
 			f.write('<p>No pace data available.</p>')
 
+		# Monthly Pace of Changes Table
+		f.write('<h3>Monthly Pace of Changes</h3>')
+		pace_by_month = data.getPaceOfChangesByMonth()
+		if pace_by_month:
+			f.write('<table class="sortable" id="pace_by_month">')
+			f.write('<tr><th>Month</th><th>Line Changes (Additions + Deletions)</th><th>% of Total Changes</th></tr>')
+			
+			total_pace_changes = sum(pace_by_month.values())
+			for month in sorted(pace_by_month.keys(), reverse=True):
+				changes = pace_by_month[month]
+				percentage = (100.0 * changes / total_pace_changes) if total_pace_changes > 0 else 0.0
+				f.write('<tr><td>%s</td><td>%d</td><td>%.2f%%</td></tr>' % (month, changes, percentage))
+			f.write('</table>')
+		else:
+			f.write('<p>No monthly pace data available.</p>')
+
+		# Yearly Pace of Changes Summary
+		f.write('<h3>Yearly Pace of Changes Summary</h3>')
+		pace_by_year = data.getPaceOfChangesByYear()
+		if pace_by_year:
+			f.write('<table class="sortable" id="pace_by_year">')
+			f.write('<tr><th>Year</th><th>Line Changes (Additions + Deletions)</th><th>% of Total Changes</th><th>Average per Month</th></tr>')
+			
+			total_pace_changes = sum(pace_by_year.values())
+			for year in sorted(pace_by_year.keys(), reverse=True):
+				changes = pace_by_year[year]
+				percentage = (100.0 * changes / total_pace_changes) if total_pace_changes > 0 else 0.0
+				avg_per_month = changes / 12.0  # Simple average
+				f.write('<tr><td>%s</td><td>%d</td><td>%.2f%%</td><td>%.1f</td></tr>' % (year, changes, percentage, avg_per_month))
+			f.write('</table>')
+		else:
+			f.write('<p>No yearly pace data available.</p>')
+
 		# Weekly activity
 		WEEKS = 32
 		f.write(html_header(2, 'Weekly activity'))
@@ -3125,10 +3662,80 @@ class HTMLReportCreator(ReportCreator):
 		if len(allauthors) > conf['max_authors']:
 			f.write('<p class="moreauthors">Only top %d authors shown</p>' % conf['max_authors'])
 
+		# Yearly Lines Added by Author
+		f.write('<h3>Cumulated Added Lines of Code per Author - Yearly Data (Top 20 Authors)</h3>')
+		lines_by_author_by_year = data.getLinesAddedByAuthorByYear()
+		if lines_by_author_by_year:
+			# Calculate top 20 authors by total lines added
+			from collections import defaultdict
+			author_totals = defaultdict(int)
+			for year_data in lines_by_author_by_year.values():
+				for author, lines in year_data.items():
+					author_totals[author] += lines
+			
+			top_20_authors = sorted(author_totals.items(), key=lambda x: x[1], reverse=True)[:20]
+			top_20_author_names = [author for author, _ in top_20_authors]
+			
+			years = sorted(lines_by_author_by_year.keys())
+			
+			f.write('<table class="sortable" id="yearly_lines_by_author">')
+			f.write('<tr><th>Author</th>')
+			for year in years:
+				f.write('<th>%d</th>' % year)
+			f.write('<th>Total</th><th>% of All Lines</th></tr>')
+			
+			total_all_lines = sum(author_totals.values())
+			
+			for author, total_lines in top_20_authors:
+				f.write('<tr><td>%s</td>' % author)
+				for year in years:
+					lines_in_year = lines_by_author_by_year.get(year, {}).get(author, 0)
+					f.write('<td>%d</td>' % lines_in_year)
+				percentage = (100.0 * total_lines / total_all_lines) if total_all_lines > 0 else 0.0
+				f.write('<td><strong>%d</strong></td><td>%.2f%%</td></tr>' % (total_lines, percentage))
+			
+			f.write('</table>')
+		else:
+			f.write('<p>No yearly author lines data available.</p>')
+
 		f.write(html_header(2, 'Commits per Author'))
 		f.write('<img src="commits_by_author.png" alt="Commits per Author">')
 		if len(allauthors) > conf['max_authors']:
 			f.write('<p class="moreauthors">Only top %d authors shown</p>' % conf['max_authors'])
+
+		# Yearly Commits by Author  
+		f.write('<h3>Commits per Author - Yearly Data</h3>')
+		commits_by_author_by_year = data.getCommitsByAuthorByYear()
+		if commits_by_author_by_year:
+			# Calculate top authors by total commits
+			author_commit_totals = defaultdict(int)
+			for year_data in commits_by_author_by_year.values():
+				for author, commits in year_data.items():
+					author_commit_totals[author] += commits
+			
+			top_authors_by_commits = sorted(author_commit_totals.items(), key=lambda x: x[1], reverse=True)[:20]
+			
+			years = sorted(commits_by_author_by_year.keys())
+			
+			f.write('<table class="sortable" id="yearly_commits_by_author">')
+			f.write('<tr><th>Author</th>')
+			for year in years:
+				f.write('<th>%d</th>' % year)
+			f.write('<th>Total</th><th>% of All Commits</th></tr>')
+			
+			total_all_commits = sum(author_commit_totals.values())
+			
+			for author, total_commits in top_authors_by_commits:
+				f.write('<tr><td>%s</td>' % author)
+				for year in years:
+					commits_in_year = commits_by_author_by_year.get(year, {}).get(author, 0)
+					f.write('<td>%d</td>' % commits_in_year)
+				percentage = (100.0 * total_commits / total_all_commits) if total_all_commits > 0 else 0.0
+				f.write('<td><strong>%d</strong></td><td>%.2f%%</td></tr>' % (total_commits, percentage))
+			
+			f.write('</table>')
+		else:
+			f.write('<p>No yearly author commits data available.</p>')
 
 		fgl = open(path + '/lines_of_code_by_author.dat', 'w')
 		fgc = open(path + '/commits_by_author.dat', 'w')
@@ -3161,6 +3768,37 @@ class HTMLReportCreator(ReportCreator):
 			fgc.write('\n')
 		fgl.close()
 		fgc.close()
+
+		# Add table for Cumulated Added Lines of Code per Author
+		f.write('<h3>Cumulated Added Lines of Code per Author (Data Table)</h3>')
+		f.write('<table class="sortable" id="lines_by_author_table">')
+		f.write('<tr><th>Author</th><th>Total Lines Added</th><th>Percentage</th><th>First Commit</th><th>Last Commit</th></tr>')
+		authors_by_lines = sorted([(author, data.getAuthorInfo(author)['lines_added']) for author in self.authors_to_plot], 
+								 key=lambda x: x[1], reverse=True)
+		total_lines_all_authors = sum(data.getAuthorInfo(author)['lines_added'] for author in self.authors_to_plot)
+		
+		for author, lines_added in authors_by_lines:
+			author_info = data.getAuthorInfo(author)
+			percentage = (100.0 * lines_added / total_lines_all_authors) if total_lines_all_authors > 0 else 0.0
+			f.write('<tr><td>%s</td><td>%d</td><td>%.2f%%</td><td>%s</td><td>%s</td></tr>' % 
+					(author, lines_added, percentage, author_info['date_first'], author_info['date_last']))
+		f.write('</table>')
+
+		# Add table for Commits per Author
+		f.write('<h3>Commits per Author (Data Table)</h3>')
+		f.write('<table class="sortable" id="commits_by_author_table">')
+		f.write('<tr><th>Author</th><th>Total Commits</th><th>Percentage</th><th>Lines Added</th><th>Lines Removed</th><th>Active Days</th></tr>')
+		authors_by_commits_sorted = sorted([(author, data.getAuthorInfo(author)['commits']) for author in self.authors_to_plot], 
+										  key=lambda x: x[1], reverse=True)
+		total_commits_all_authors = sum(data.getAuthorInfo(author)['commits'] for author in self.authors_to_plot)
+		
+		for author, commits in authors_by_commits_sorted:
+			author_info = data.getAuthorInfo(author)
+			percentage = (100.0 * commits / total_commits_all_authors) if total_commits_all_authors > 0 else 0.0
+			f.write('<tr><td>%s</td><td>%d</td><td>%.2f%%</td><td>%d</td><td>%d</td><td>%d</td></tr>' % 
+					(author, commits, percentage, author_info.get('lines_added', 0), 
+					 author_info.get('lines_removed', 0), len(author_info.get('active_days', []))))
+		f.write('</table>')
 
 		# Authors :: Author of Month
 		f.write(html_header(2, 'Author of Month'))
@@ -3339,22 +3977,57 @@ class HTMLReportCreator(ReportCreator):
 			pass
 		f.write('</dl>\n')
 
-		# Files :: File count by date
-		f.write(html_header(2, 'File count by date'))
+		# Files :: File count by year
+		f.write(html_header(2, 'File count by year'))
 
-		# use set to get rid of duplicate/unnecessary entries
-		files_by_date = set()
-		for stamp in sorted(data.files_by_stamp.keys()):
-			files_by_date.add('%s %d' % (datetime.datetime.fromtimestamp(stamp).strftime('%Y-%m-%d'), data.files_by_stamp[stamp]))
-
-		fg = open(path + '/files_by_date.dat', 'w')
-		for line in sorted(list(files_by_date)):
-			fg.write('%s\n' % line)
-		#for stamp in sorted(data.files_by_stamp.keys()):
-		#	fg.write('%s %d\n' % (datetime.datetime.fromtimestamp(stamp).strftime('%Y-%m-%d'), data.files_by_stamp[stamp]))
-		fg.close()
+		# Generate yearly file count data
+		files_by_year = data.getFilesByYear()
+		
+		if files_by_year:
+			fg = open(path + '/files_by_year.dat', 'w')
+			for year in sorted(files_by_year.keys()):
+				fg.write('%d %d\n' % (year, files_by_year[year]))
+			fg.close()
 			
-		f.write('<img src="files_by_date.png" alt="Files by Date">')
+			f.write('<img src="files_by_year.png" alt="Files by Year">')
+
+			# Add table for File count by year
+			f.write('<table class="sortable" id="files_by_year_table">')
+			f.write('<tr><th>Year</th><th>Max File Count</th><th>Change from Previous Year</th><th>Growth Rate</th></tr>')
+			
+			prev_count = 0
+			for year in sorted(files_by_year.keys()):
+				file_count = files_by_year[year]
+				change = file_count - prev_count if prev_count > 0 else 0
+				growth_rate = (100.0 * change / prev_count) if prev_count > 0 and change > 0 else 0.0
+				
+				change_str = f"+{change}" if change > 0 else str(change) if change < 0 else "0"
+				f.write('<tr><td>%d</td><td>%d</td><td>%s</td><td>%.1f%%</td></tr>' % (year, file_count, change_str, growth_rate))
+				prev_count = file_count
+			f.write('</table>')
+		else:
+			f.write('<p>No yearly file count data available.</p>')
+
+		# Keep original files by date data for reference
+		f.write('<h3>Recent File Count Changes (Last 20 commits)</h3>')
+		f.write('<table class="sortable" id="files_by_date_table">')
+		f.write('<tr><th>Date</th><th>File Count</th><th>Change from Previous</th></tr>')
+		
+		# Sort the file count data by date
+		sorted_file_data = []
+		for stamp in sorted(data.files_by_stamp.keys()):
+			date_str = datetime.datetime.fromtimestamp(stamp).strftime('%Y-%m-%d')
+			file_count = data.files_by_stamp[stamp]
+			sorted_file_data.append((date_str, file_count, stamp))
+		
+		# Calculate changes from previous counts
+		prev_count = 0
+		for i, (date_str, file_count, stamp) in enumerate(sorted_file_data[-20:]):  # Show last 20 entries
+			change = file_count - prev_count if prev_count > 0 else 0
+			change_str = f"+{change}" if change > 0 else str(change) if change < 0 else "0"
+			f.write('<tr><td>%s</td><td>%d</td><td>%s</td></tr>' % (date_str, file_count, change_str))
+			prev_count = file_count
+		f.write('</table>')
 
 		#f.write('<h2>Average file size by date</h2>')
 
@@ -3459,6 +4132,56 @@ class HTMLReportCreator(ReportCreator):
 		for stamp in sorted(data.changes_by_date.keys()):
 			fg.write('%d %d\n' % (stamp, data.changes_by_date[stamp]['lines']))
 		fg.close()
+
+		# Add yearly Lines of Code data
+		f.write('<h3>Lines of Code - Yearly Data</h3>')
+		lines_by_year_data = data.lines_added_by_year
+		lines_removed_by_year_data = data.lines_removed_by_year
+		
+		if lines_by_year_data:
+			f.write('<table class="sortable" id="lines_of_code_yearly">')
+			f.write('<tr><th>Year</th><th>Lines Added</th><th>Lines Removed</th><th>Net Change</th><th>Growth Rate</th></tr>')
+			
+			years = sorted(set(list(lines_by_year_data.keys()) + list(lines_removed_by_year_data.keys())))
+			prev_net = 0
+			
+			for year in years:
+				lines_added = lines_by_year_data.get(year, 0)
+				lines_removed = lines_removed_by_year_data.get(year, 0)
+				net_change = lines_added - lines_removed
+				
+				if prev_net > 0:
+					growth_rate = (100.0 * net_change / prev_net) if prev_net > 0 else 0.0
+				else:
+					growth_rate = 0.0
+				
+				f.write('<tr><td>%d</td><td>%d</td><td>%d</td><td>%+d</td><td>%.1f%%</td></tr>' % 
+						(year, lines_added, lines_removed, net_change, growth_rate))
+				prev_net = net_change if net_change > 0 else prev_net
+			
+			f.write('</table>')
+		else:
+			f.write('<p>No yearly lines of code data available.</p>')
+
+		# Keep original detailed table for recent changes
+		f.write('<h3>Recent Lines of Code Changes (Last 25 commits)</h3>')
+		f.write('<table class="sortable" id="lines_of_code_table">')
+		f.write('<tr><th>Date</th><th>Total Lines</th><th>Files Changed</th><th>Lines Added</th><th>Lines Removed</th><th>Net Change</th></tr>')
+		
+		# Show data from the changes_by_date dictionary (last 25 entries)
+		sorted_changes = sorted(data.changes_by_date.items(), key=lambda x: x[0])[-25:]
+		
+		for stamp, change_data in sorted_changes:
+			date_str = datetime.datetime.fromtimestamp(stamp).strftime('%Y-%m-%d')
+			total_lines = change_data['lines']
+			files_changed = change_data['files']
+			lines_added = change_data['ins']
+			lines_removed = change_data['del']
+			net_change = lines_added - lines_removed
+			
+			f.write('<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%+d</td></tr>' % 
+					(date_str, total_lines, files_changed, lines_added, lines_removed, net_change))
+		f.write('</table>')
 
 		# Add SLOC composition chart data
 		f.write(html_header(2, 'Source Lines of Code (SLOC) Composition'))
@@ -3614,6 +4337,10 @@ class HTMLReportCreator(ReportCreator):
 			if os.path.exists('files_by_date.dat'):
 				chart_generator.create_files_by_date_chart('files_by_date.dat', 'files_by_date.png')
 			
+			# files by year
+			if os.path.exists('files_by_year.dat'):
+				chart_generator.create_files_by_year_chart('files_by_year.dat', 'files_by_year.png')
+			
 			# lines of code
 			if os.path.exists('lines_of_code.dat'):
 				chart_generator.create_lines_of_code_chart('lines_of_code.dat', 'lines_of_code.png')
@@ -3658,6 +4385,8 @@ class HTMLReportCreator(ReportCreator):
 		try:
 			with open(css_path, 'r') as css_file:
 				css_content = css_file.read()
+				# Escape % characters to prevent string formatting issues
+				css_content = css_content.replace('%', '%%')
 		except FileNotFoundError:
 			print(f'Warning: CSS file not found at {css_path}')
 
@@ -3667,6 +4396,8 @@ class HTMLReportCreator(ReportCreator):
 		try:
 			with open(js_path, 'r') as js_file:
 				js_content = js_file.read()
+				# Escape % characters to prevent string formatting issues
+				js_content = js_content.replace('%', '%%')
 		except FileNotFoundError:
 			print(f'Warning: JavaScript file not found at {js_path}')
 
@@ -3810,6 +4541,101 @@ class HTMLReportCreator(ReportCreator):
 			page-break-inside: avoid;
 		}
 	}
+	
+	/* Enhanced Project Health Dashboard Styles */
+	#project_health {
+		background: linear-gradient(135deg, #f8f9fa 0%%, #e9ecef 100%%);
+		border: 2px solid #dee2e6;
+		border-radius: 10px;
+		padding: 20px;
+		margin: 20px 0;
+		box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+	}
+	
+	#project_health h2 {
+		background: linear-gradient(135deg, #28a745 0%%, #20c997 100%%);
+		color: white;
+		text-align: center;
+		margin: -20px -20px 20px -20px;
+		padding: 15px;
+		border-radius: 8px 8px 0 0;
+		border: none;
+	}
+	
+	#project_health h3 {
+		color: #495057;
+		border-bottom: 2px solid #dee2e6;
+		padding-bottom: 5px;
+		margin-top: 25px;
+	}
+	
+	#project_health dl {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 10px 20px;
+		margin-bottom: 20px;
+	}
+	
+	#project_health dt {
+		font-weight: bold;
+		color: #495057;
+		align-self: center;
+	}
+	
+	#project_health dd {
+		margin: 0;
+		padding: 8px 12px;
+		background-color: white;
+		border: 1px solid #dee2e6;
+		border-radius: 5px;
+		align-self: center;
+	}
+	
+	#project_health .health-score {
+		font-size: 1.2em;
+		font-weight: bold;
+	}
+	
+	#project_health .risk-high {
+		background-color: #f8d7da;
+		border-color: #f1aeb5;
+		color: #721c24;
+	}
+	
+	#project_health .risk-medium {
+		background-color: #fff3cd;
+		border-color: #ffeaa7;
+		color: #856404;
+	}
+	
+	#project_health .risk-low {
+		background-color: #d1edff;
+		border-color: #bee5eb;
+		color: #0c5460;
+	}
+	
+	#project_health ul {
+		list-style-type: none;
+		padding: 0;
+	}
+	
+	#project_health li {
+		background-color: #fff3cd;
+		border: 1px solid #ffeaa7;
+		border-radius: 5px;
+		padding: 10px;
+		margin-bottom: 8px;
+		position: relative;
+		padding-left: 35px;
+	}
+	
+	#project_health li:before {
+		content: "⚠";
+		position: absolute;
+		left: 10px;
+		color: #856404;
+		font-weight: bold;
+	}
 	</style>
 	<script type="text/javascript">
 %s
@@ -3823,6 +4649,7 @@ class HTMLReportCreator(ReportCreator):
 <div class="nav">
 <ul>
 <li><a href="#general">General</a></li>
+<li><a href="#project_health">Project Health</a></li>
 <li><a href="#activity">Activity</a></li>
 <li><a href="#authors">Authors</a></li>
 <li><a href="#team_analysis">Team Analysis</a></li>
@@ -4052,10 +4879,10 @@ Options:
 --multi-repo     Scan folder recursively for multiple repositories and generate reports for each
 -h, --help       Show this help message
 
-Note: GitStats always generates both HTML and PDF reports.
+Note: GitStats generates HTML reports with charts and detailed statistics.
 
 Examples:
-  gitstats repo output                    # Generates both HTML and PDF reports
+  gitstats repo output                    # Generates HTML report
   gitstats --verbose repo output          # With verbose output
   gitstats --multi-repo /path/to/repos output  # Generate reports for all repos found recursively
   gitstats --debug -c max_authors=50 repo output
@@ -4579,12 +5406,10 @@ class GitStats:
 
 		print('Generating report...')
 		
-		# Always generate both HTML and PDF reports
 		print('Creating HTML report...')
 		html_report = HTMLReportCreator()
 		html_report.create(data, outputpath)
 		
-
 
 		time_end = time.time()
 		exectime_internal = time_end - time_start
@@ -4595,8 +5420,6 @@ class GitStats:
 			print('You may now run:')
 			print()
 			print('   sensible-browser \'%s\'' % os.path.join(outputpath, 'index.html').replace("'", "'\\''"))
-			pdf_filename = f"gitstats_{data.projectname.replace(' ', '_')}.pdf"
-			print('   PDF report: \'%s\'' % os.path.join(outputpath, pdf_filename).replace("'", "'\\''"))
 			print()
 	
 	def process_single_repository(self, repo_path, output_path, rundir):

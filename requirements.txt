@@ -1,4 +1,3 @@
-fpdf2==2.8.3  # package provides the `fpdf` module (fpdf2)
 psutil==7.0.0
 matplotlib>=3.7.0
 

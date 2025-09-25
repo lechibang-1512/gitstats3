@@ -2,12 +2,12 @@
 
 **gitstats3** is a git history statistics generator, ported from Python 2 to Python 3.
 
-This project analyzes and visualizes statistics from git repositories (commit activity, author contributions, file changes, and more) and produces an HTML report (optionally a PDF) with charts and detail pages.
+This project analyzes and visualizes statistics from git repositories (commit activity, author contributions, file changes, and more) and produces an HTML report with charts and detail pages.
 
 
 **Highlights**
 
-- Generates detailed HTML + optional PDF reports from a git repository
+- Generates detailed HTML reports from a git repository
 - Produces charts (PNG) and raw data files for further processing
 - Supports analyzing one repository or scanning a folder tree for many repositories (multi-repo)
 - Lightweight; single-file script with a small set of Python dependencies
@@ -37,7 +37,7 @@ Python dependencies are listed in `requirements.txt` and include:
 
 - `matplotlib` (>=3.7.0)
 - `psutil`
-- `fpdf2`
+
 
 Install them with:
 
@@ -70,7 +70,7 @@ This will:
 - Collect repository history and statistics
 - Generate an `index.html` report and detail pages in `/path/to/output`
 - Produce PNG charts (if `gnuplot` / matplotlib is available)
-- Optionally create a `gitstats_*.pdf` summary (requires `fpdf2`)
+
 
 Common flags:
 
