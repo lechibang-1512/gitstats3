@@ -172,6 +172,10 @@ You can set configuration values with the `-c key=value` option. The following d
 - `debug`: False
 - `verbose`: False
 
+Branch scanning defaults:
+
+- `scan_default_branch_only`: True — Only analyze commits from the default branch (main/master/develop). Set to `false` to include all branches.
+
 Multi-repo specific defaults:
 
 - `multi_repo_max_depth`: 3
@@ -190,6 +194,9 @@ python gitstats.py -c start_date=2024-01-01 /path/to/repo /path/to/output
 
 # Limit number of worker processes
 python gitstats.py -c processes=2 /path/to/repo /path/to/output
+
+# Scan all branches instead of just the default branch
+python gitstats.py -c scan_default_branch_only=false /path/to/repo /path/to/output
 ```
 
 

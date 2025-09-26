@@ -22,6 +22,9 @@ if sys.version_info < (3, 6):
 	sys.exit(1)
 
 from multiprocessing import Pool
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+import threading
+import queue
 
 os.environ['LC_ALL'] = 'C'
 
@@ -616,19 +619,23 @@ conf = {
 	'commit_end': 'HEAD',
 	'linear_linestats': 1,
 	'project_name': '',
-	'processes': 8,
+	'processes': min(8, os.cpu_count() or 4),  # Auto-detect optimal process count
 	'start_date': '',
 	'debug': False,
 	'verbose': False,
+	'scan_default_branch_only': True,  # Only scan commits from the default branch
 	# Multi-repo specific configuration
 	'multi_repo_max_depth': 10,
 	'multi_repo_max_depth': 10,
 	'multi_repo_include_patterns': None,
 	'multi_repo_exclude_patterns': None,
-	'multi_repo_parallel': False,
+	'multi_repo_parallel': True,
 	'multi_repo_max_workers': 4,
 	'multi_repo_timeout': 3600,  # 1 hour timeout per repository
 	'multi_repo_cleanup_on_error': True,
+	'multi_repo_fast_scan': True,  # Enable fast concurrent repository discovery
+	'multi_repo_batch_size': 10,  # Process repositories in batches to manage memory
+	'multi_repo_progress_interval': 5,  # Progress update interval in seconds
 	# File extension filtering configuration
 	'allowed_extensions': {
 		'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx', '.m', '.mm',
@@ -672,6 +679,51 @@ def getpipeoutput(cmds, quiet = False):
 	exectime_external += (end - start)
 	return output.decode('utf-8', errors='replace').rstrip('\n')
 
+def get_default_branch():
+	"""Get the default branch name from git configuration or detect it"""
+	# First try to get the default branch from git config
+	try:
+		default_branch = getpipeoutput(['git symbolic-ref refs/remotes/origin/HEAD']).strip()
+		if default_branch:
+			# Extract branch name from refs/remotes/origin/HEAD -> refs/remotes/origin/main
+			return default_branch.replace('refs/remotes/origin/', '')
+	except:
+		pass
+	
+	# Try to get from git config init.defaultBranch
+	try:
+		default_branch = getpipeoutput(['git config --get init.defaultBranch']).strip()
+		if default_branch:
+			return default_branch
+	except:
+		pass
+	
+	# Try common main branch names in order of preference
+	main_branch_candidates = ['main', 'master', 'develop', 'development']
+	
+	# Get all local branches
+	try:
+		branches_output = getpipeoutput(['git branch'])
+		local_branches = [line.strip().lstrip('* ') for line in branches_output.split('\n') if line.strip()]
+		
+		# Check if any of the common main branches exist
+		for candidate in main_branch_candidates:
+			if candidate in local_branches:
+				return candidate
+		
+		# If none found, use the first branch
+		if local_branches:
+			return local_branches[0]
+	except:
+		pass
+	
+	# Fall back to master
+	return 'master'
+
+def get_first_parent_flag():
+	"""Get --first-parent flag if scanning only default branch"""
+	return '--first-parent' if conf['scan_default_branch_only'] else ''
+
 def getlogrange(defaultrange = 'HEAD', end_only = True):
 	commit_range = getcommitrange(defaultrange, end_only)
 	if len(conf['start_date']) > 0:
@@ -683,6 +735,14 @@ def getcommitrange(defaultrange = 'HEAD', end_only = False):
 		if end_only or len(conf['commit_begin']) == 0:
 			return conf['commit_end']
 		return '%s..%s' % (conf['commit_begin'], conf['commit_end'])
+	
+	# If configured to scan only default branch and using default range
+	if conf['scan_default_branch_only'] and defaultrange == 'HEAD':
+		default_branch = get_default_branch()
+		if conf['verbose']:
+			print(f'Scanning only default branch: {default_branch}')
+		return default_branch
+	
 	return defaultrange
 
 def getkeyssortedbyvalues(dict):
@@ -1339,15 +1399,23 @@ class DataCollector:
 		print('Saving cache...')
 		tempfile = cachefile + '.tmp'
 		try:
+			# Optimize cache before saving - remove old/stale entries
+			optimized_cache = self._optimizeCache()
+			
 			with open(tempfile, 'wb') as f:
-				#pickle.dump(self.cache, f)
-				data = zlib.compress(pickle.dumps(self.cache))
+				# Use higher compression level for better storage efficiency
+				data = zlib.compress(pickle.dumps(optimized_cache), level=6)
 				f.write(data)
 			try:
 				os.remove(cachefile)
 			except OSError:
 				pass
 			os.rename(tempfile, cachefile)
+			
+			if conf['verbose']:
+				cache_size_mb = os.path.getsize(cachefile) / (1024 * 1024)
+				print(f'Cache saved: {cache_size_mb:.2f} MB')
+				
 		except IOError as e:
 			print(f'Warning: Could not save cache file {cachefile}: {e}')
 			# Clean up temp file if it exists
@@ -1355,10 +1423,41 @@ class DataCollector:
 				os.remove(tempfile)
 			except OSError:
 				pass
+	
+	def _optimizeCache(self):
+		"""Optimize cache by removing old or unnecessary entries."""
+		if not hasattr(self, 'cache') or not self.cache:
+			return {}
+		
+		optimized = {}
+		
+		# Keep essential cache entries
+		for key in ['files_in_tree', 'lines_in_blob']:
+			if key in self.cache:
+				cache_data = self.cache[key]
+				
+				# For files_in_tree, keep only recent entries (limit to prevent unbounded growth)
+				if key == 'files_in_tree' and len(cache_data) > 10000:
+					# Keep most recent 10000 entries
+					sorted_items = sorted(cache_data.items())[-10000:]
+					optimized[key] = dict(sorted_items)
+					if conf['verbose']:
+						print(f'Optimized {key} cache: {len(cache_data)} -> {len(optimized[key])} entries')
+				else:
+					optimized[key] = cache_data
+		
+		return optimized
 
 class GitDataCollector(DataCollector):
 	def collect(self, dir):
 		DataCollector.collect(self, dir)
+		
+		# Print information about branch scanning
+		if conf['scan_default_branch_only']:
+			default_branch = get_default_branch()
+			print(f'Branch scanning: ONLY scanning default branch ({default_branch})')
+		else:
+			print('Branch scanning: Scanning ALL branches (default behavior)')
 		
 		# Print information about extension filtering
 		if conf['filter_by_extensions']:
@@ -1368,7 +1467,8 @@ class GitDataCollector(DataCollector):
 		else:
 			print('File extension filtering is DISABLED. Analyzing all file types.')
 
-		self.total_authors += int(getpipeoutput(['git shortlog -s %s' % getlogrange(), 'wc -l']))
+		first_parent_flag = get_first_parent_flag()
+		self.total_authors += int(getpipeoutput(['git shortlog -s %s %s' % (first_parent_flag, getlogrange()), 'wc -l']))
 		#self.total_lines = int(getoutput('git-ls-files -z |xargs -0 cat |wc -l'))
 
 		# Clear tags for each repository to avoid multirepo contamination
@@ -1416,7 +1516,8 @@ class GitDataCollector(DataCollector):
 
 		# Collect revision statistics
 		# Outputs "<stamp> <date> <time> <timezone> <author> '<' <mail> '>'"
-		lines = getpipeoutput(['git rev-list --pretty=format:"%%at %%ai %%aN <%%aE>" %s' % getlogrange('HEAD'), 'grep -v ^commit']).split('\n')
+		first_parent_flag = get_first_parent_flag()
+		lines = getpipeoutput(['git rev-list %s --pretty=format:"%%at %%ai %%aN <%%aE>" %s' % (first_parent_flag, getlogrange('HEAD')), 'grep -v ^commit']).split('\n')
 		for line in lines:
 			parts = line.split(' ', 4)
 			author = ''
@@ -1513,7 +1614,8 @@ class GitDataCollector(DataCollector):
 			self.commits_by_timezone[timezone] += 1
 
 		# outputs "<stamp> <files>" for each revision
-		revlines = getpipeoutput(['git rev-list --pretty=format:"%%at %%T" %s' % getlogrange('HEAD'), 'grep -v ^commit']).strip().split('\n')
+		first_parent_flag = get_first_parent_flag()
+		revlines = getpipeoutput(['git rev-list %s --pretty=format:"%%at %%T" %s' % (first_parent_flag, getlogrange('HEAD')), 'grep -v ^commit']).strip().split('\n')
 		lines = []
 		revs_to_read = []
 		time_rev_count = []
@@ -1532,10 +1634,17 @@ class GitDataCollector(DataCollector):
 				revs_to_read.append((time,rev))
 
 		#Read revisions from repo
-		pool = Pool(processes=conf['processes'])
-		time_rev_count = pool.map(getnumoffilesfromrev, revs_to_read)
-		pool.terminate()
-		pool.join()
+		if revs_to_read:
+			# Use optimized multiprocessing with better resource management
+			worker_count = min(len(revs_to_read), conf['processes'])
+			if conf['verbose']:
+				print(f'Processing {len(revs_to_read)} revisions with {worker_count} workers')
+			
+			# Use context manager for better resource cleanup
+			with Pool(processes=worker_count) as pool:
+				time_rev_count = pool.map(getnumoffilesfromrev, revs_to_read)
+		else:
+			time_rev_count = []
 
 		#Update cache with new revisions and append then to general list
 		for (time, rev, count) in time_rev_count:
@@ -1616,16 +1725,26 @@ class GitDataCollector(DataCollector):
 				blobs_to_read.append((ext,blob_id))
 
 		#Get info abount line count for new blob's that wasn't found in cache
-		pool = Pool(processes=conf['processes'])
-		ext_blob_linecount = pool.map(getnumoflinesinblob, blobs_to_read)
-		pool.terminate()
-		pool.join()
+		if blobs_to_read:
+			worker_count = min(len(blobs_to_read), conf['processes'])
+			if conf['verbose']:
+				print(f'Processing {len(blobs_to_read)} uncached blobs with {worker_count} workers')
+			
+			with Pool(processes=worker_count) as pool:
+				ext_blob_linecount = pool.map(getnumoflinesinblob, blobs_to_read)
+		else:
+			ext_blob_linecount = []
 
 		# Also get SLOC analysis for ALL blobs (not just uncached ones)
-		pool = Pool(processes=conf['processes'])
-		ext_blob_sloc = pool.map(analyzesloc, all_blobs_for_sloc)
-		pool.terminate()
-		pool.join()
+		if all_blobs_for_sloc:
+			worker_count = min(len(all_blobs_for_sloc), conf['processes'])
+			if conf['verbose']:
+				print(f'Performing SLOC analysis on {len(all_blobs_for_sloc)} blobs with {worker_count} workers')
+			
+			with Pool(processes=worker_count) as pool:
+				ext_blob_sloc = pool.map(analyzesloc, all_blobs_for_sloc)
+		else:
+			ext_blob_sloc = []
 
 		#Update cache and write down info about number of number of lines
 		for (ext, blob_id, linecount) in ext_blob_linecount:
@@ -1656,7 +1775,8 @@ class GitDataCollector(DataCollector):
 
 		# File revision counting
 		print('Collecting file revision statistics...')
-		revision_lines = getpipeoutput(['git log --name-only --pretty=format: %s' % getlogrange('HEAD')]).strip().split('\n')
+		first_parent_flag = get_first_parent_flag()
+		revision_lines = getpipeoutput(['git log %s --name-only --pretty=format: %s' % (first_parent_flag, getlogrange('HEAD'))]).strip().split('\n')
 		for line in revision_lines:
 			line = line.strip()
 			if len(line) > 0 and not line.startswith('commit'):
@@ -1678,7 +1798,8 @@ class GitDataCollector(DataCollector):
 
 		# Directory activity analysis
 		print('Collecting directory activity statistics...')
-		numstat_lines = getpipeoutput(['git log --numstat --pretty=format:"%%at %%aN" %s' % getlogrange('HEAD')]).split('\n')
+		first_parent_flag = get_first_parent_flag()
+		numstat_lines = getpipeoutput(['git log %s --numstat --pretty=format:"%%at %%aN" %s' % (first_parent_flag, getlogrange('HEAD'))]).split('\n')
 		current_author = None
 		current_timestamp = None
 		
@@ -1730,6 +1851,14 @@ class GitDataCollector(DataCollector):
 		extra = ''
 		if conf['linear_linestats']:
 			extra = '--first-parent -m'
+		
+		# Add --first-parent if scanning only default branch
+		first_parent_flag = get_first_parent_flag()
+		if first_parent_flag and not extra:
+			extra = first_parent_flag
+		elif first_parent_flag and extra:
+			extra = f'{first_parent_flag} {extra}'
+		
 		lines = getpipeoutput(['git log --shortstat %s --pretty=format:"%%at %%aN" %s' % (extra, getlogrange('HEAD'))]).split('\n')
 		lines.reverse()
 		files = 0; inserted = 0; deleted = 0; total_lines = 0
@@ -1806,10 +1935,10 @@ class GitDataCollector(DataCollector):
 		# defined for stamp, author only if author commited at this timestamp.
 		self.changes_by_date_by_author = {} # stamp -> author -> lines_added
 
-		# Similar to the above, but never use --first-parent
-		# (we need to walk through every commit to know who
-		# committed what, not just through mainline)
-		lines = getpipeoutput(['git log --shortstat --date-order --pretty=format:"%%at %%aN" %s' % (getlogrange('HEAD'))]).split('\n')
+		# Similar to the above, but add --first-parent if configured to scan default branch only
+		# When scanning default branch only, we only want commits from the main line
+		first_parent_flag = get_first_parent_flag()
+		lines = getpipeoutput(['git log %s --shortstat --date-order --pretty=format:"%%at %%aN" %s' % (first_parent_flag, getlogrange('HEAD'))]).split('\n')
 		lines.reverse()
 		files = 0; inserted = 0; deleted = 0
 		author = None
@@ -2069,7 +2198,8 @@ class GitDataCollector(DataCollector):
 		try:
 			# Get commit details with files changed
 			log_range = getlogrange('HEAD')
-			commit_data = getpipeoutput(['git log --name-only --pretty=format:"COMMIT:%%H:%%aN:%%at" %s' % log_range]).split('\n')
+			first_parent_flag = get_first_parent_flag()
+			commit_data = getpipeoutput(['git log %s --name-only --pretty=format:"COMMIT:%%H:%%aN:%%at" %s' % (first_parent_flag, log_range)]).split('\n')
 			
 			current_commit = None
 			current_author = None
@@ -2172,7 +2302,8 @@ class GitDataCollector(DataCollector):
 		try:
 			# Get detailed commit information using a simpler, more reliable approach
 			log_range = getlogrange('HEAD')
-			commit_lines = getpipeoutput(['git log --shortstat --pretty=format:"COMMIT:%%H:%%aN:%%at:%%s" %s' % log_range]).split('\n')
+			first_parent_flag = get_first_parent_flag()
+			commit_lines = getpipeoutput(['git log %s --shortstat --pretty=format:"COMMIT:%%H:%%aN:%%at:%%s" %s' % (first_parent_flag, log_range)]).split('\n')
 			
 			current_author = None
 			current_timestamp = None
@@ -2270,7 +2401,8 @@ class GitDataCollector(DataCollector):
 		try:
 			# Get commit timestamps with timezone info
 			log_range = getlogrange('HEAD')
-			commit_lines = getpipeoutput(['git log --pretty=format:"%%aN|%%at|%%ai|%%s" %s' % log_range]).split('\n')
+			first_parent_flag = get_first_parent_flag()
+			commit_lines = getpipeoutput(['git log %s --pretty=format:"%%aN|%%at|%%ai|%%s" %s' % (first_parent_flag, log_range)]).split('\n')
 			
 			for line in commit_lines:
 				if not line.strip():
@@ -2399,14 +2531,23 @@ class GitDataCollector(DataCollector):
 				if not should_include_file(filename):
 					continue
 				
-				# Mark files as critical based on common patterns
-				critical_patterns = [
-					'main.', 'app.', 'index.', 'config.', 'settings.',
-					'setup.', 'package.json', 'requirements.txt', 'Dockerfile',
-					'makefile', 'readme', 'license', '.env'
-				]
+				# Mark files as critical based on allowed extensions
+				critical_patterns = {
+					'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx', '.m', '.mm',
+					'.swift', '.cu', '.cuh', '.cl', '.java', '.scala', '.kt', '.go', '.rs',
+					'.py', '.pyi', '.pyx', '.pxd', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx',
+					'.d.ts', '.lua', '.proto', '.thrift', '.asm', '.s', '.S', '.R', '.r'
+				}
 				
-				if any(pattern in filename_lower for pattern in critical_patterns):
+				# Check if file has a critical extension
+				file_extension = None
+				if '.' in filename:
+					file_extension = '.' + filename.split('.')[-1].lower()
+					# Handle special cases like .d.ts
+					if filename.lower().endswith('.d.ts'):
+						file_extension = '.d.ts'
+				
+				if file_extension and file_extension in critical_patterns:
 					self.critical_files.add(filepath)
 				
 				# Files in root directory are often critical
@@ -2419,7 +2560,8 @@ class GitDataCollector(DataCollector):
 			
 			# Get file change history
 			log_range = getlogrange('HEAD')
-			log_lines = getpipeoutput(['git log --name-only --pretty=format:"AUTHOR:%%aN" %s' % log_range]).split('\n')
+			first_parent_flag = get_first_parent_flag()
+			log_lines = getpipeoutput(['git log %s --name-only --pretty=format:"AUTHOR:%%aN" %s' % (first_parent_flag, log_range)]).split('\n')
 			current_author = None
 			
 			for line in log_lines:
@@ -4784,7 +4926,7 @@ def _is_bare_repository(path):
 	return True
 
 def discover_repositories(scan_path, recursive=False, max_depth=10, include_patterns=None, exclude_patterns=None):
-	"""Discover all git repositories in a directory with advanced options.
+	"""Discover all git repositories in a directory with advanced options and concurrent scanning.
 	
 	Args:
 		scan_path: Directory to scan for repositories
@@ -4820,6 +4962,12 @@ def discover_repositories(scan_path, recursive=False, max_depth=10, include_patt
 			'bin',
 			'obj'      # .NET build dirs
 		]
+	
+	# Use fast concurrent scanning if enabled
+	if conf.get('multi_repo_fast_scan', True) and recursive:
+		return _discover_repositories_concurrent(scan_path, max_depth, include_patterns, exclude_patterns)
+	
+	# Fallback to original sequential scanning
 	
 	def _should_exclude_directory(dir_name, dir_path):
 		"""Check if directory should be excluded based on patterns."""
@@ -4950,6 +5098,167 @@ def discover_repositories(scan_path, recursive=False, max_depth=10, include_patt
 	
 	return repositories
 
+def _discover_repositories_concurrent(scan_path, max_depth=10, include_patterns=None, exclude_patterns=None):
+	"""Fast concurrent repository discovery using ThreadPoolExecutor."""
+	repositories = []
+	repositories_lock = threading.Lock()
+	
+	# Set default patterns
+	if exclude_patterns is None:
+		exclude_patterns = [
+			'.*', 'node_modules', 'venv', '__pycache__',
+			'build', 'dist', 'target', 'bin', 'obj'
+		]
+	
+	def _should_exclude_directory(dir_name, dir_path):
+		"""Check if directory should be excluded based on patterns."""
+		import fnmatch
+		
+		for pattern in exclude_patterns:
+			if fnmatch.fnmatch(dir_name, pattern):
+				return True
+		
+		if include_patterns:
+			for pattern in include_patterns:
+				if fnmatch.fnmatch(dir_name, pattern):
+					return False
+			return True
+		
+		return False
+	
+	def _determine_repo_type(repo_path):
+		"""Determine the type of git repository."""
+		git_dir = os.path.join(repo_path, '.git')
+		
+		if os.path.isdir(git_dir):
+			return 'regular'
+		elif os.path.isfile(git_dir):
+			return 'worktree'
+		elif _is_bare_repository(repo_path):
+			return 'bare'
+		else:
+			return 'unknown'
+	
+	def _scan_directory_concurrent(path_depth_tuple):
+		"""Thread-safe directory scanning function."""
+		current_path, current_depth = path_depth_tuple
+		
+		if current_depth > max_depth:
+			return []
+		
+		local_repos = []
+		
+		try:
+			# Handle permission errors gracefully
+			try:
+				items = os.listdir(current_path)
+			except (PermissionError, OSError) as e:
+				if conf['verbose']:
+					print(f'  Permission/access error: {current_path}: {e}')
+				return []
+			
+			# Check if current directory is a git repository
+			if is_git_repository(current_path):
+				repo_name = os.path.basename(current_path)
+				repo_type = _determine_repo_type(current_path)
+				local_repos.append((repo_name, current_path, repo_type))
+				
+				if conf['verbose']:
+					print(f'  Found {repo_type} repository: {repo_name}')
+				
+				# Don't scan inside git repositories
+				return local_repos
+			
+			# Collect subdirectories to scan
+			subdirs_to_scan = []
+			for item in sorted(items):
+				item_path = os.path.join(current_path, item)
+				
+				if not os.path.isdir(item_path):
+					continue
+				
+				# Handle symlinks carefully
+				if os.path.islink(item_path):
+					try:
+						real_path = os.path.realpath(item_path)
+						scan_real_path = os.path.realpath(scan_path)
+						
+						if not real_path.startswith(scan_real_path):
+							continue
+					except (OSError, ValueError):
+						continue
+				
+				# Check exclusion patterns
+				if _should_exclude_directory(item, item_path):
+					if conf['debug']:
+						print(f'  Excluding: {item_path}')
+					continue
+				
+				subdirs_to_scan.append((item_path, current_depth + 1))
+			
+			# Recursively scan subdirectories (will be handled by thread pool)
+			return subdirs_to_scan
+			
+		except Exception as e:
+			if conf['verbose']:
+				print(f'  Error scanning {current_path}: {e}')
+			return []
+	
+	if conf['verbose']:
+		print(f'Starting concurrent repository discovery in: {scan_path}')
+		print(f'  Max depth: {max_depth}')
+		print(f'  Max workers: {min(conf["multi_repo_max_workers"], 8)}')
+	
+	# Use ThreadPoolExecutor for I/O bound directory scanning
+	max_workers = min(conf.get('multi_repo_max_workers', 4), 8)  # Cap at 8 threads
+	
+	# Queue of directories to scan
+	dirs_to_scan = queue.Queue()
+	dirs_to_scan.put((scan_path, 0))
+	
+	with ThreadPoolExecutor(max_workers=max_workers) as executor:
+		# Keep track of active futures
+		active_futures = set()
+		
+		while not dirs_to_scan.empty() or active_futures:
+			# Submit new tasks if we have directories to scan and available workers
+			while not dirs_to_scan.empty() and len(active_futures) < max_workers:
+				path_depth = dirs_to_scan.get()
+				future = executor.submit(_scan_directory_concurrent, path_depth)
+				active_futures.add(future)
+			
+			# Check completed futures
+			completed_futures = set()
+			for future in active_futures:
+				if future.done():
+					completed_futures.add(future)
+					try:
+						result = future.result()
+						
+						# Result can be either repositories or subdirectories to scan
+						for item in result:
+							if len(item) == 3:  # It's a repository (name, path, type)
+								with repositories_lock:
+									repositories.append(item)
+							elif len(item) == 2:  # It's a directory to scan (path, depth)
+								dirs_to_scan.put(item)
+					except Exception as e:
+						if conf['verbose']:
+							print(f'  Error in scanning task: {e}')
+			
+			# Remove completed futures
+			active_futures -= completed_futures
+			
+			# Small delay to prevent busy waiting
+			if active_futures:
+				import time
+				time.sleep(0.001)
+	
+	if conf['verbose']:
+		print(f'Concurrent repository discovery complete. Found {len(repositories)} repositories.')
+	
+	return repositories
+
 def usage():
 	print("""
 Usage: gitstats [options] <gitpath..> <outputpath>
@@ -4982,11 +5291,16 @@ With --multi-repo mode:
 - Default maximum scan depth is 3 levels (configurable)
 
 Multi-repo configuration options (use with -c key=value):
-  multi_repo_max_depth=N               # Maximum depth for recursive scanning (default: 3)
+  multi_repo_max_depth=N               # Maximum depth for recursive scanning (default: 10)
   multi_repo_include_patterns=pat1,pat2 # Comma-separated glob patterns for directories to include
   multi_repo_exclude_patterns=pat1,pat2 # Comma-separated glob patterns for directories to exclude
   multi_repo_timeout=N                 # Timeout in seconds per repository (default: 3600)
   multi_repo_cleanup_on_error=True/False # Clean up partial output on error (default: True)
+  multi_repo_parallel=True/False       # Enable parallel processing (default: True)
+  multi_repo_max_workers=N             # Maximum parallel workers (default: 4)
+  multi_repo_fast_scan=True/False      # Enable concurrent repository discovery (default: True)
+  multi_repo_batch_size=N              # Process repositories in batches (default: 10)
+  multi_repo_progress_interval=N       # Progress update interval in seconds (default: 5)
 
 File extension filtering options (use with -c key=value):
   filter_by_extensions=True/False      # Enable/disable file extension filtering (default: True)
@@ -5075,7 +5389,7 @@ class GitStats:
 				sys.exit(1)
 			
 			# Check for multi-repo configuration options
-			max_depth = conf.get('multi_repo_max_depth', 3)
+			max_depth = conf.get('multi_repo_max_depth', 10)
 			include_patterns = conf.get('multi_repo_include_patterns', None)
 			exclude_patterns = conf.get('multi_repo_exclude_patterns', None)
 			
@@ -5196,55 +5510,65 @@ class GitStats:
 		
 		print(f'Processing {len(validated_repos)} validated repositories...')
 		
-		for i, (repo_name, repo_path, repo_type) in enumerate(validated_repos, 1):
-			repo_start_time = time.time()
-			print(f'\n{"="*60}')
-			print(f'Processing repository {i}/{len(validated_repos)}: {repo_name}')
-			print(f'Repository path: {repo_path}')
-			print(f'Repository type: {repo_type}')
-			
-			# Create repository-specific output directory with safe naming
-			safe_repo_name = self._sanitize_filename(repo_name)
-			repo_output_path = os.path.join(base_outputpath, f'{safe_repo_name}_report')
-			
-			try:
-				# Create output directory
-				os.makedirs(repo_output_path, exist_ok=True)
-				if not os.access(repo_output_path, os.W_OK):
-					raise PermissionError(f'No write permission for {repo_output_path}')
+		# Determine if we should use parallel processing
+		use_parallel = (conf.get('multi_repo_parallel', True) and 
+						len(validated_repos) > 1 and 
+						conf.get('multi_repo_max_workers', 4) > 1)
+		
+		if use_parallel:
+			successful_reports, failed_reports = self._process_repositories_parallel(
+				validated_repos, base_outputpath, rundir)
+		else:
+			# Sequential processing (original approach)
+			for i, (repo_name, repo_path, repo_type) in enumerate(validated_repos, 1):
+				repo_start_time = time.time()
+				print(f'\n{"="*60}')
+				print(f'Processing repository {i}/{len(validated_repos)}: {repo_name}')
+				print(f'Repository path: {repo_path}')
+				print(f'Repository type: {repo_type}')
 				
-				print(f'Report output path: {repo_output_path}')
+				# Create repository-specific output directory with safe naming
+				safe_repo_name = self._sanitize_filename(repo_name)
+				repo_output_path = os.path.join(base_outputpath, f'{safe_repo_name}_report')
 				
-				# Process this repository with timeout protection
-				self._process_single_repository_safe(repo_path, repo_output_path, rundir, repo_name)
-				
-				repo_time = time.time() - repo_start_time
-				successful_reports += 1
-				print(f'✓ Successfully generated report for {repo_name} in {repo_time:.2f}s')
-				
-			except KeyboardInterrupt:
-				print(f'\n✗ Interrupted while processing {repo_name}')
-				failed_reports.append((repo_name, 'Processing interrupted by user'))
-				break
-			except Exception as e:
-				repo_time = time.time() - repo_start_time
-				error_msg = str(e)
-				failed_reports.append((repo_name, error_msg))
-				print(f'✗ Failed to generate report for {repo_name} after {repo_time:.2f}s: {error_msg}')
-				if conf['debug']:
-					import traceback
-					traceback.print_exc()
-				
-				# Try to clean up partial output
 				try:
-					if os.path.exists(repo_output_path):
-						import shutil
-						shutil.rmtree(repo_output_path)
-						if conf['verbose']:
-							print(f'  Cleaned up partial output directory: {repo_output_path}')
-				except Exception as cleanup_error:
+					# Create output directory
+					os.makedirs(repo_output_path, exist_ok=True)
+					if not os.access(repo_output_path, os.W_OK):
+						raise PermissionError(f'No write permission for {repo_output_path}')
+					
+					print(f'Report output path: {repo_output_path}')
+					
+					# Process this repository with timeout protection
+					self._process_single_repository_safe(repo_path, repo_output_path, rundir, repo_name)
+					
+					repo_time = time.time() - repo_start_time
+					successful_reports += 1
+					print(f'✓ Successfully generated report for {repo_name} in {repo_time:.2f}s')
+					
+				except KeyboardInterrupt:
+					print(f'\n✗ Interrupted while processing {repo_name}')
+					failed_reports.append((repo_name, 'Processing interrupted by user'))
+					break
+				except Exception as e:
+					repo_time = time.time() - repo_start_time
+					error_msg = str(e)
+					failed_reports.append((repo_name, error_msg))
+					print(f'✗ Failed to generate report for {repo_name} after {repo_time:.2f}s: {error_msg}')
 					if conf['debug']:
-						print(f'  Warning: Could not clean up {repo_output_path}: {cleanup_error}')
+						import traceback
+						traceback.print_exc()
+					
+					# Try to clean up partial output
+					try:
+						if os.path.exists(repo_output_path):
+							import shutil
+							shutil.rmtree(repo_output_path)
+							if conf['verbose']:
+								print(f'  Cleaned up partial output directory: {repo_output_path}')
+					except Exception as cleanup_error:
+						if conf['debug']:
+							print(f'  Warning: Could not clean up {repo_output_path}: {cleanup_error}')
 		
 		# Generate summary report
 		total_time = time.time() - total_start_time
@@ -5341,12 +5665,6 @@ class GitStats:
 	
 	def _process_single_repository_safe(self, repo_path, output_path, rundir, repo_name):
 		"""Process a single repository with additional safety measures."""
-		import signal
-		import threading
-		
-		# Store original signal handler
-		original_sigterm = signal.signal(signal.SIGTERM, signal.SIG_DFL)
-		
 		try:
 			self.process_single_repository(repo_path, output_path, rundir)
 		except KeyboardInterrupt:
@@ -5356,9 +5674,6 @@ class GitStats:
 			# Enhance error message with repository context
 			enhanced_error = f"Error processing {repo_name}: {str(e)}"
 			raise Exception(enhanced_error) from e
-		finally:
-			# Restore original signal handler
-			signal.signal(signal.SIGTERM, original_sigterm)
 	
 	def _generate_multi_repo_summary(self, base_outputpath, repositories, successful_count, 
 									failed_reports, skipped_repos, total_time):
@@ -5519,6 +5834,136 @@ class GitStats:
 			print('   sensible-browser \'%s\'' % os.path.join(outputpath, 'index.html').replace("'", "'\\''"))
 			print()
 	
+	def _process_repositories_parallel(self, repositories, base_outputpath, rundir):
+		"""Process repositories in parallel for improved performance."""
+		# Configuration
+		max_workers = conf.get('multi_repo_max_workers', 4)
+		batch_size = conf.get('multi_repo_batch_size', 10)
+		progress_interval = conf.get('multi_repo_progress_interval', 5)
+		
+		print(f'Using parallel processing with {max_workers} workers, batch size: {batch_size}')
+		
+		# Process repositories in batches to manage memory
+		total_repos = len(repositories)
+		
+		# Shared state for progress tracking
+		progress_state = {
+			'processed_count': 0,
+			'last_progress_time': time.time(),
+			'start_time': time.time(),
+			'completion_times': [],
+			'successful_reports': 0,
+			'failed_reports': []
+		}
+		
+		# Create a thread-safe progress tracker
+		progress_lock = threading.Lock()
+		
+		def _process_repository_worker(repo_data):
+			"""Worker function for processing a single repository."""
+			repo_name, repo_path, repo_type = repo_data
+			
+			try:
+				# Create output directory with safe naming
+				safe_repo_name = self._sanitize_filename(repo_name)
+				repo_output_path = os.path.join(base_outputpath, f'{safe_repo_name}_report')
+				
+				# Create directory
+				os.makedirs(repo_output_path, exist_ok=True)
+				if not os.access(repo_output_path, os.W_OK):
+					raise PermissionError(f'No write permission for {repo_output_path}')
+				
+				# Process the repository
+				repo_start_time = time.time()
+				self._process_single_repository_safe(repo_path, repo_output_path, rundir, repo_name)
+				repo_time = time.time() - repo_start_time
+				
+				# Thread-safe progress update with ETA
+				with progress_lock:
+					progress_state['processed_count'] += 1
+					current_time = time.time()
+					progress_state['completion_times'].append(current_time)
+					
+					if (current_time - progress_state['last_progress_time'] >= progress_interval or 
+						progress_state['processed_count'] == total_repos):
+						
+						# Calculate ETA
+						if len(progress_state['completion_times']) >= 5:
+							avg_time_per_repo = (current_time - progress_state['start_time']) / progress_state['processed_count']
+							remaining_repos = total_repos - progress_state['processed_count']
+							eta_seconds = remaining_repos * avg_time_per_repo
+							eta_str = f', ETA: {int(eta_seconds//60)}m {int(eta_seconds%60)}s' if eta_seconds > 0 else ''
+						else:
+							eta_str = ''
+						
+						print(f'Progress: {progress_state["processed_count"]}/{total_repos} repositories completed '
+							  f'({(progress_state["processed_count"]/total_repos)*100:.1f}%){eta_str}')
+						progress_state['last_progress_time'] = current_time
+				
+				return (repo_name, 'success', repo_time, None)
+				
+			except Exception as e:
+				error_msg = str(e)
+				
+				# Clean up partial output on error
+				if conf.get('multi_repo_cleanup_on_error', True):
+					try:
+						safe_repo_name = self._sanitize_filename(repo_name)
+						repo_output_path = os.path.join(base_outputpath, f'{safe_repo_name}_report')
+						if os.path.exists(repo_output_path):
+							import shutil
+							shutil.rmtree(repo_output_path)
+					except Exception:
+						pass  # Ignore cleanup errors
+				
+				with progress_lock:
+					progress_state['processed_count'] += 1
+				
+				return (repo_name, 'failed', 0, error_msg)
+		
+		# Process repositories in batches
+		for batch_start in range(0, total_repos, batch_size):
+			batch_end = min(batch_start + batch_size, total_repos)
+			batch_repos = repositories[batch_start:batch_end]
+			
+			if conf['verbose']:
+				print(f'\nProcessing batch {batch_start//batch_size + 1}/{(total_repos + batch_size - 1)//batch_size}: '
+					  f'repositories {batch_start + 1}-{batch_end}')
+			
+			# Use ThreadPoolExecutor for I/O-bound repository processing
+			# (ProcessPoolExecutor would be better for CPU-bound, but git operations are mostly I/O)
+			with ThreadPoolExecutor(max_workers=max_workers) as executor:
+				try:
+					# Submit all jobs in the batch
+					futures = {executor.submit(_process_repository_worker, repo_data): repo_data 
+							  for repo_data in batch_repos}
+					
+					# Collect results as they complete
+					for future in as_completed(futures):
+						repo_name, status, duration, error = future.result()
+						
+						if status == 'success':
+							progress_state['successful_reports'] += 1
+							if conf['verbose']:
+								print(f'✓ {repo_name} completed in {duration:.2f}s')
+						else:
+							progress_state['failed_reports'].append((repo_name, error))
+							if conf['verbose']:
+								print(f'✗ {repo_name} failed: {error}')
+				
+				except KeyboardInterrupt:
+					print('\nProcessing interrupted by user')
+					# Cancel remaining futures
+					for future in futures:
+						future.cancel()
+					break
+			
+			# Memory cleanup between batches
+			import gc
+			gc.collect()
+		
+		return progress_state['successful_reports'], progress_state['failed_reports']
+	
 	def process_single_repository(self, repo_path, output_path, rundir):
 		"""Process a single repository and generate its report with improved resource management."""
 		import gc
@@ -5628,9 +6073,24 @@ class GitStats:
 			process = psutil.Process()
 			return process.memory_info().rss / 1024 / 1024  # Convert to MB
 		except ImportError:
-			return None
+			# Fallback to basic memory info on systems without psutil
+			try:
+				import resource
+				return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # Convert to MB (Linux)
+			except (ImportError, AttributeError):
+				return None
 		except Exception:
 			return None
+	
+	def _check_memory_pressure(self, max_memory_mb=2048):
+		"""Check if we're using too much memory and suggest cleanup."""
+		current_memory = self._get_memory_usage()
+		if current_memory and current_memory > max_memory_mb:
+			if conf['verbose']:
+				print(f'Warning: High memory usage detected ({current_memory:.1f} MB). '
+					  f'Consider reducing batch size or max workers.')
+			return True
+		return False
 
 if __name__=='__main__':
 	try:
