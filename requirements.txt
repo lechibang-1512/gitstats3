@@ -1,10 +1,9 @@
 psutil==7.0.0
-matplotlib>=3.7.0
 
 # Notes:
 # - System tools (not Python packages):
 #   - `git` (found: git version 2.47.3)
-#   - `matplotlib` (Python package for chart generation)
+# - Matplotlib removed - now using table-based data visualization
 # - If you're using a virtual environment, install with:
 #
 #   python3 -m venv .venv
