@@ -621,14 +621,22 @@ conf = {
 	'debug': False,
 	'verbose': False,
 	# Multi-repo specific configuration
-	'multi_repo_max_depth': 3,
-	'multi_repo_max_depth': 3,
+	'multi_repo_max_depth': 10,
+	'multi_repo_max_depth': 10,
 	'multi_repo_include_patterns': None,
 	'multi_repo_exclude_patterns': None,
 	'multi_repo_parallel': False,
 	'multi_repo_max_workers': 4,
 	'multi_repo_timeout': 3600,  # 1 hour timeout per repository
-	'multi_repo_cleanup_on_error': True
+	'multi_repo_cleanup_on_error': True,
+	# File extension filtering configuration
+	'allowed_extensions': {
+		'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx', '.m', '.mm',
+		'.swift', '.cu', '.cuh', '.cl', '.java', '.scala', '.kt', '.go', '.rs',
+		'.py', '.pyi', '.pyx', '.pxd', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx',
+		'.d.ts', '.lua', '.proto', '.thrift', '.asm', '.s', '.S', '.R', '.r'
+	},
+	'filter_by_extensions': True  # Enable/disable extension filtering
 }
 
 def getpipeoutput(cmds, quiet = False):
@@ -715,12 +723,45 @@ def getmatplotlibversion():
 	except ImportError:
 		return "matplotlib not available"
 
+def should_include_file(filename):
+	"""
+	Check if a file should be included in the analysis based on its extension.
+	
+	Args:
+		filename (str): The filename to check
+		
+	Returns:
+		bool: True if the file should be included, False otherwise
+	"""
+	if not conf['filter_by_extensions']:
+		return True
+	
+	# Get the file extension
+	if filename.find('.') == -1 or filename.rfind('.') == 0:
+		# No extension or hidden file
+		return False
+	
+	ext = '.' + filename[(filename.rfind('.') + 1):]
+	return ext.lower() in conf['allowed_extensions']
+
 def getnumoffilesfromrev(time_rev):
 	"""
-	Get number of files changed in commit
+	Get number of files changed in commit (filtered by allowed extensions)
 	"""
 	time, rev = time_rev
-	return (int(time), rev, int(getpipeoutput(['git ls-tree -r --name-only "%s"' % rev, 'wc -l']).split('\n')[0]))
+	if conf['filter_by_extensions']:
+		# Get all files and filter by extension
+		all_files = getpipeoutput(['git ls-tree -r --name-only "%s"' % rev]).split('\n')
+		filtered_files = []
+		for file_path in all_files:
+			if file_path.strip():  # Skip empty lines
+				filename = file_path.split('/')[-1]
+				if should_include_file(filename):
+					filtered_files.append(file_path)
+		return (int(time), rev, len(filtered_files))
+	else:
+		# Original behavior - count all files
+		return (int(time), rev, int(getpipeoutput(['git ls-tree -r --name-only "%s"' % rev, 'wc -l']).split('\n')[0]))
 
 def getnumoflinesinblob(ext_blob):
 	"""
@@ -1318,6 +1359,14 @@ class DataCollector:
 class GitDataCollector(DataCollector):
 	def collect(self, dir):
 		DataCollector.collect(self, dir)
+		
+		# Print information about extension filtering
+		if conf['filter_by_extensions']:
+			print(f'File extension filtering is ENABLED. Only analyzing files with these extensions:')
+			extensions_list = sorted(list(conf['allowed_extensions']))
+			print(f'  {", ".join(extensions_list)}')
+		else:
+			print('File extension filtering is DISABLED. Analyzing all file types.')
 
 		self.total_authors += int(getpipeoutput(['git shortlog -s %s' % getlogrange(), 'wc -l']))
 		#self.total_lines = int(getoutput('git-ls-files -z |xargs -0 cat |wc -l'))
@@ -1529,13 +1578,20 @@ class GitDataCollector(DataCollector):
 			size = int(parts[3])
 			fullpath = parts[4]
 
+			filename = fullpath.split('/')[-1] # strip directories
+			
+			# Apply extension filtering - skip files that don't match allowed extensions
+			if not should_include_file(filename):
+				if conf['verbose'] or conf['debug']:
+					print(f'Skipping file (extension not in allowed list): {fullpath}')
+				continue
+
 			self.total_size += size
 			self.total_files += 1
 			
 			# Track individual file sizes
 			self.file_sizes[fullpath] = size
 
-			filename = fullpath.split('/')[-1] # strip directories
 			if filename.find('.') == -1 or filename.rfind('.') == 0:
 				ext = ''
 			else:
@@ -1605,6 +1661,12 @@ class GitDataCollector(DataCollector):
 			line = line.strip()
 			if len(line) > 0 and not line.startswith('commit'):
 				# This is a filename
+				filename = line.split('/')[-1]  # Get just the filename for extension check
+				
+				# Apply extension filtering
+				if not should_include_file(filename):
+					continue
+				
 				if line not in self.file_revisions:
 					self.file_revisions[line] = 0
 				self.file_revisions[line] += 1
@@ -1643,6 +1705,11 @@ class GitDataCollector(DataCollector):
 						additions = int(parts[0]) if parts[0] != '-' else 0
 						deletions = int(parts[1]) if parts[1] != '-' else 0
 						filename = '\t'.join(parts[2:])  # Handle filenames with tabs
+						
+						# Apply extension filtering
+						file_basename = filename.split('/')[-1]
+						if not should_include_file(file_basename):
+							continue
 						
 						# Track directory activity
 						directory = os.path.dirname(filename) if os.path.dirname(filename) else '.'
@@ -2024,6 +2091,11 @@ class GitDataCollector(DataCollector):
 					# This is a filename
 					filename = line
 					
+					# Apply extension filtering
+					file_basename = filename.split('/')[-1]
+					if not should_include_file(file_basename):
+						continue
+					
 					# Initialize author collaboration data
 					if current_author not in self.author_collaboration:
 						self.author_collaboration[current_author] = {
@@ -2320,7 +2392,12 @@ class GitDataCollector(DataCollector):
 				if not filepath.strip():
 					continue
 				
-				filename = os.path.basename(filepath).lower()
+				filename = os.path.basename(filepath)
+				filename_lower = filename.lower()
+				
+				# Apply extension filtering
+				if not should_include_file(filename):
+					continue
 				
 				# Mark files as critical based on common patterns
 				critical_patterns = [
@@ -2329,7 +2406,7 @@ class GitDataCollector(DataCollector):
 					'makefile', 'readme', 'license', '.env'
 				]
 				
-				if any(pattern in filename for pattern in critical_patterns):
+				if any(pattern in filename_lower for pattern in critical_patterns):
 					self.critical_files.add(filepath)
 				
 				# Files in root directory are often critical
@@ -2351,6 +2428,12 @@ class GitDataCollector(DataCollector):
 					current_author = line.replace('AUTHOR:', '')
 				elif line and current_author and not line.startswith('AUTHOR:'):
 					filename = line
+					
+					# Apply extension filtering
+					file_basename = filename.split('/')[-1]
+					if not should_include_file(file_basename):
+						continue
+					
 					file_authors[filename].add(current_author)
 					file_change_count[filename] += 1
 			
@@ -4700,7 +4783,7 @@ def _is_bare_repository(path):
 	
 	return True
 
-def discover_repositories(scan_path, recursive=False, max_depth=3, include_patterns=None, exclude_patterns=None):
+def discover_repositories(scan_path, recursive=False, max_depth=10, include_patterns=None, exclude_patterns=None):
 	"""Discover all git repositories in a directory with advanced options.
 	
 	Args:
@@ -4905,6 +4988,10 @@ Multi-repo configuration options (use with -c key=value):
   multi_repo_timeout=N                 # Timeout in seconds per repository (default: 3600)
   multi_repo_cleanup_on_error=True/False # Clean up partial output on error (default: True)
 
+File extension filtering options (use with -c key=value):
+  filter_by_extensions=True/False      # Enable/disable file extension filtering (default: True)
+  allowed_extensions=.py,.js,.java    # Comma-separated list of allowed extensions (default: see below)
+
 Default config values:
 %s
 
@@ -4941,6 +5028,16 @@ class GitStats:
 					elif key.endswith('_patterns') and value:
 						# Handle comma-separated patterns
 						conf[key] = [pattern.strip() for pattern in value.split(',') if pattern.strip()]
+					elif key == 'allowed_extensions' and value:
+						# Handle comma-separated extensions, ensure they start with '.'
+						extensions = []
+						for ext in value.split(','):
+							ext = ext.strip()
+							if ext and not ext.startswith('.'):
+								ext = '.' + ext
+							if ext:
+								extensions.append(ext)
+						conf[key] = set(extensions)
 					else:
 						conf[key] = value
 				except ValueError as e:
@@ -5502,21 +5599,21 @@ class GitStats:
 				if conf['debug']:
 					import traceback
 					traceback.print_exc()
-			
-			# Clean up partial output on error if configured to do so
-			if conf.get('multi_repo_cleanup_on_error', True):
-				try:
-					if os.path.exists(output_path):
-						import shutil
-						# Only clean up if it looks like our output directory
-						if output_path.endswith('_report'):
-							shutil.rmtree(output_path)
-							if conf['verbose']:
-								print(f'  Cleaned up partial output: {output_path}')
-				except Exception as cleanup_error:
-					if conf['debug']:
-						print(f'  Warning: Cleanup failed: {cleanup_error}')
-			raise e
+				
+				# Clean up partial output on error if configured to do so
+				if conf.get('multi_repo_cleanup_on_error', True):
+					try:
+						if os.path.exists(output_path):
+							import shutil
+							# Only clean up if it looks like our output directory
+							if output_path.endswith('_report'):
+								shutil.rmtree(output_path)
+								if conf['verbose']:
+									print(f'  Cleaned up partial output: {output_path}')
+					except Exception as cleanup_error:
+						if conf['debug']:
+							print(f'  Warning: Cleanup failed: {cleanup_error}')
+				raise
 		
 		finally:
 			# Force garbage collection to free memory
