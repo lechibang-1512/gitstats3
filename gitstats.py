@@ -501,182 +501,607 @@ def is_git_repository(path):
 	return False
 
 class DataCollector:
-	"""Manages data collection from a revision control repository."""
+	"""Consolidated data collector for repository metrics with optimized memory usage."""
 	def __init__(self):
 		self.stamp_created = time.time()
 		self.cache = {}
 		self.total_authors = 0
-		self.activity_by_hour_of_day = defaultdict(int) # hour -> commits
-		self.activity_by_day_of_week = defaultdict(int) # day -> commits
-		self.activity_by_month_of_year = defaultdict(int) # month [1-12] -> commits
-		self.activity_by_hour_of_week = defaultdict(lambda: defaultdict(int)) # weekday -> hour -> commits
-		self.activity_by_hour_of_day_busiest = 0
-		self.activity_by_hour_of_week_busiest = 0
-		self.activity_by_year_week = defaultdict(int) # yy_wNN -> commits
-		self.activity_by_year_week_peak = 0
+		
+		# Core activity metrics - consolidated for memory efficiency
+		self.activity_metrics = {
+			'by_hour_of_day': defaultdict(int),
+			'by_day_of_week': defaultdict(int),
+			'by_month_of_year': defaultdict(int),
+			'by_hour_of_week': defaultdict(lambda: defaultdict(int)),
+			'by_year_week': defaultdict(int),
+			'hour_of_day_busiest': 0,
+			'hour_of_week_busiest': 0,
+			'year_week_peak': 0
+		}
 
-		self.authors = {} # name -> {commits, first_commit_stamp, last_commit_stamp, last_active_day, active_days, lines_added, lines_removed}
+		# Core repository statistics - consolidated
+		self.repository_stats = {
+			'total_commits': 0,
+			'total_files': 0,
+			'total_lines': 0,
+			'total_lines_added': 0,
+			'total_lines_removed': 0,
+			'total_size': 0,
+			'first_commit_stamp': 0,
+			'last_commit_stamp': 0,
+			'last_active_day': None,
+			'active_days': set(),
+			'repository_size_mb': 0.0
+		}
 
-		self.total_commits = 0
-		self.total_files = 0
+		# Author data - consolidated structure
+		self.authors = {}  # name -> all author metrics
 		self.authors_by_commits = 0
 
-		# domains
-		self.domains = defaultdict(lambda: defaultdict(int)) # domain -> commits
+		# Domain and timezone analysis
+		self.domains = defaultdict(lambda: defaultdict(int))
+		self.commits_by_timezone = defaultdict(int)
 
-		# author of the month
-		self.author_of_month = defaultdict(lambda: defaultdict(int)) # month -> author -> commits
-		self.author_of_year = defaultdict(lambda: defaultdict(int)) # year -> author -> commits
-		self.commits_by_month = defaultdict(int) # month -> commits
-		self.commits_by_year = defaultdict(int) # year -> commits
-		self.lines_added_by_month = defaultdict(int) # month -> lines added
-		self.lines_added_by_year = defaultdict(int) # year -> lines added
-		self.lines_removed_by_month = defaultdict(int) # month -> lines removed
-		self.lines_removed_by_year = defaultdict(int) # year -> lines removed
-		self.first_commit_stamp = 0
-		self.last_commit_stamp = 0
-		self.last_active_day = None
-		self.active_days = set()
+		# Temporal analysis - consolidated
+		self.temporal_data = {
+			'author_of_month': defaultdict(lambda: defaultdict(int)),
+			'author_of_year': defaultdict(lambda: defaultdict(int)),
+			'commits_by_month': defaultdict(int),
+			'commits_by_year': defaultdict(int),
+			'lines_added_by_month': defaultdict(int),
+			'lines_added_by_year': defaultdict(int),
+			'lines_removed_by_month': defaultdict(int),
+			'lines_removed_by_year': defaultdict(int),
+			'lines_added_by_author_by_year': defaultdict(lambda: defaultdict(int)),
+			'commits_by_author_by_year': defaultdict(lambda: defaultdict(int)),
+			'files_by_year': defaultdict(int),
+			'files_by_stamp': {},
+			'changes_by_date': {},
+			'pace_of_changes': {},
+			'pace_of_changes_by_month': defaultdict(int),
+			'pace_of_changes_by_year': defaultdict(int)
+		}
 
-		# lines
-		self.total_lines = 0
-		self.total_lines_added = 0
-		self.total_lines_removed = 0
-		
-		# SLOC (Source Lines of Code) analysis
-		self.total_source_lines = 0
-		self.total_comment_lines = 0
-		self.total_blank_lines = 0
-		self.sloc_by_extension = {} # ext -> {'source': 0, 'comments': 0, 'blank': 0, 'total': 0}
-		
-		# File size and revision tracking
-		self.file_sizes = {} # filepath -> size in bytes
-		
-		# Enhanced Metrics - College Project Consolidation
-		# 1. Documentation Quality Metrics (12% weight - highest priority)
-		self.documentation_metrics = {
+		# Recent activity tracking - consolidated
+		self.recent_activity = {
+			'last_30_days_commits': 0,
+			'last_30_days_lines_added': 0,
+			'last_30_days_lines_removed': 0,
+			'last_12_months_commits': defaultdict(int),
+			'last_12_months_lines_added': defaultdict(int),
+			'last_12_months_lines_removed': defaultdict(int)
+		}
+
+		# Code quality and structure metrics - consolidated
+		self.code_analysis = {
+			# SLOC analysis
+			'total_source_lines': 0,
 			'total_comment_lines': 0,
-			'total_documentation_files': 0,
-			'api_documented_functions': 0,
-			'total_functions': 0,
-			'readme_sections': 0,
-			'inline_comments': 0,
-			'docstring_coverage': 0.0
+			'total_blank_lines': 0,
+			'sloc_by_extension': {},
+			
+			# File analysis
+			'extensions': {},
+			'file_sizes': {},
+			'file_revisions': {},
+			'file_types': defaultdict(int),
+			'large_files': [],
+			'complex_files': [],
+			'hot_files': [],
+			
+			# Directory analysis
+			'directories': defaultdict(lambda: {
+				'commits': 0, 'lines_added': 0, 'lines_removed': 0, 'files': set()
+			}),
+			'directory_revisions': defaultdict(int)
 		}
-		
-		# 2. Code Quality Metrics (SonarQube-inspired)
-		self.code_quality_metrics = {
-			'cyclomatic_complexity': 0,
-			'code_duplication_lines': 0,
-			'technical_debt_minutes': 0,
-			'maintainability_index': 0.0,
-			'code_smells': 0,
-			'security_hotspots': 0
-		}
-		
-		# 3. Team Collaboration Metrics (Enhanced)
-		self.collaboration_metrics = {
-			'bus_factor': 0,
-			'knowledge_concentration': {},  # file -> primary_authors
-			'pair_programming_commits': 0,
-			'review_coverage': 0.0,
-			'cross_team_commits': 0,
-			'mentorship_pairs': {}
-		}
-		
-		# 4. Project Health Metrics
+
+		# Enhanced project health metrics - consolidated and optimized
 		self.project_health = {
 			'overall_health_score': 0.0,
-			'trend_direction': 'stable',  # improving/declining/stable
-			'risk_level': 'low',  # low/medium/high
+			'trend_direction': 'stable',
+			'risk_level': 'low',
+			'quality_gate_status': 'unknown',
 			'actionable_issues': [],
-			'quality_gate_status': 'unknown'
+			
+			# Documentation metrics
+			'documentation_quality': {
+				'comment_lines': 0,
+				'documentation_files': 0,
+				'documented_functions': 0,
+				'total_functions': 0,
+				'readme_sections': 0,
+				'docstring_coverage': 0.0
+			},
+			
+			# Code quality metrics
+			'code_quality': {
+				'cyclomatic_complexity': 0,
+				'maintainability_index': 0.0,
+				'technical_debt_minutes': 0
+			},
+			
+			# Team collaboration metrics
+			'collaboration': {
+				'bus_factor': 0,
+				'knowledge_concentration': {},
+				'cross_team_commits': 0
+			}
 		}
-		
-		# 5. Enhanced File Analysis
-		self.file_analysis = {
-			'file_types': defaultdict(int),
-			'large_files': [],  # files > 500 LOC
-			'complex_files': [],  # high complexity files
-			'orphaned_files': [],  # files with single contributor
-			'hot_files': []  # frequently modified files
+
+		# Branch analysis - consolidated
+		self.branch_analysis = {
+			'branches': {},
+			'unmerged_branches': [],
+			'main_branch': 'master'
 		}
-		self.file_revisions = {} # filepath -> revision count
 
-		# Directory activity tracking
-		self.directories = defaultdict(lambda: {'commits': 0, 'lines_added': 0, 'lines_removed': 0, 'files': set()})
-		self.directory_revisions = defaultdict(int) # directory -> total file revisions in directory
+		# Team analysis - consolidated for memory efficiency
+		self.team_analysis = {
+			'author_collaboration': {},
+			'commit_patterns': {},
+			'working_patterns': {},
+			'impact_analysis': {},
+			'team_performance': {},
+			'critical_files': set(),
+			'file_impact_scores': {},
+			'author_active_periods': {}
+		}
 
-		# size
-		self.total_size = 0
+		# Commit categorization
+		self.commit_categories = {
+			'bug_commits': [],
+			'refactoring_commits': [],
+			'feature_commits': []
+		}
 
-		# timezone
-		self.commits_by_timezone = defaultdict(int) # timezone -> commits
-
-		# tags
+		# Tags
 		self.tags = {}
+		
+		# Track changes by date by author
+		self.changes_by_date_by_author = {}
+		
+		# Compatibility properties for backward compatibility
+		self._setup_compatibility_properties()
+	
+	def _setup_compatibility_properties(self):
+		"""Setup properties for backward compatibility with existing code."""
+		# Map old property names to new consolidated structures
+		pass  # Properties will be handled by @property decorators
+	
+	def get_consolidated_metrics(self):
+		"""Get a comprehensive summary of all metrics in consolidated format."""
+		return {
+			'repository_stats': self.repository_stats,
+			'activity_metrics': dict(self.activity_metrics),  # Convert defaultdicts to regular dicts
+			'temporal_data': {k: (dict(v) if hasattr(v, 'items') and callable(getattr(v, 'items', None)) else v) 
+							 for k, v in self.temporal_data.items()},
+			'recent_activity': dict(self.recent_activity),
+			'code_analysis': {k: (dict(v) if hasattr(v, 'items') and callable(getattr(v, 'items', None)) else v)
+							 for k, v in self.code_analysis.items()},
+			'project_health': self.project_health,
+			'branch_analysis': self.branch_analysis,
+			'team_analysis': self.team_analysis,
+			'commit_categories': self.commit_categories,
+			'authors': self.authors,
+			'tags': self.tags,
+			'domains': {k: dict(v) for k, v in self.domains.items()}
+		}
+	
+	def update_memory_efficient_metrics(self, metric_type, key, value=None, increment=1):
+		"""Memory-efficient metric updating with consolidated access patterns."""
+		metric_maps = {
+			'activity': self.activity_metrics,
+			'repository': self.repository_stats, 
+			'temporal': self.temporal_data,
+			'recent': self.recent_activity,
+			'code': self.code_analysis,
+			'health': self.project_health,
+			'branch': self.branch_analysis,
+			'team': self.team_analysis
+		}
+		
+		if metric_type in metric_maps:
+			if value is not None:
+				metric_maps[metric_type][key] = value
+			else:
+				metric_maps[metric_type][key] += increment
+			return True
+		return False
+	
+	def optimize_memory_usage(self):
+		"""Optimize memory usage by converting defaultdicts to regular dicts and cleaning up cache."""
+		# Convert defaultdicts to regular dicts to save memory
+		for metric_group in [self.activity_metrics, self.temporal_data, self.recent_activity]:
+			for key, value in metric_group.items():
+				if hasattr(value, 'default_factory') and value.default_factory:
+					metric_group[key] = dict(value)
+		
+		# Convert nested defaultdicts
+		for key, value in self.temporal_data.items():
+			if hasattr(value, 'items'):
+				for subkey, subvalue in value.items():
+					if hasattr(subvalue, 'default_factory') and subvalue.default_factory:
+						value[subkey] = dict(subvalue)
+		
+		# Clean up large cache items that are no longer needed
+		if 'files_in_tree' in self.cache and len(self.cache['files_in_tree']) > 10000:
+			# Keep only most recent 5000 entries
+			items = list(self.cache['files_in_tree'].items())
+			self.cache['files_in_tree'] = dict(items[-5000:])
+		
+		if 'lines_in_blob' in self.cache and len(self.cache['lines_in_blob']) > 10000:
+			# Keep only most recent 5000 entries  
+			items = list(self.cache['lines_in_blob'].items())
+			self.cache['lines_in_blob'] = dict(items[-5000:])
+			
+		return True
+		
+	# Backward compatibility properties
+	@property
+	def activity_by_hour_of_day(self):
+		return self.activity_metrics['by_hour_of_day']
+		
+	@property
+	def activity_by_day_of_week(self):
+		return self.activity_metrics['by_day_of_week']
+		
+	@property
+	def activity_by_month_of_year(self):
+		return self.activity_metrics['by_month_of_year']
+		
+	@property 
+	def activity_by_hour_of_week(self):
+		return self.activity_metrics['by_hour_of_week']
+		
+	@property
+	def activity_by_year_week(self):
+		return self.activity_metrics['by_year_week']
+		
+	@property
+	def activity_by_hour_of_day_busiest(self):
+		return self.activity_metrics['hour_of_day_busiest']
+		
+	@activity_by_hour_of_day_busiest.setter
+	def activity_by_hour_of_day_busiest(self, value):
+		self.activity_metrics['hour_of_day_busiest'] = value
+		
+	@property
+	def activity_by_hour_of_week_busiest(self):
+		return self.activity_metrics['hour_of_week_busiest']
+		
+	@activity_by_hour_of_week_busiest.setter
+	def activity_by_hour_of_week_busiest(self, value):
+		self.activity_metrics['hour_of_week_busiest'] = value
+		
+	@property
+	def activity_by_year_week_peak(self):
+		return self.activity_metrics['year_week_peak']
+		
+	@activity_by_year_week_peak.setter
+	def activity_by_year_week_peak(self, value):
+		self.activity_metrics['year_week_peak'] = value
 
-		self.files_by_stamp = {} # stamp -> files
+	# Repository stats properties
+	@property
+	def total_commits(self):
+		return self.repository_stats['total_commits']
+		
+	@total_commits.setter
+	def total_commits(self, value):
+		self.repository_stats['total_commits'] = value
+		
+	@property
+	def total_files(self):
+		return self.repository_stats['total_files']
+		
+	@total_files.setter
+	def total_files(self, value):
+		self.repository_stats['total_files'] = value
+		
+	@property
+	def total_lines(self):
+		return self.repository_stats['total_lines']
+		
+	@total_lines.setter
+	def total_lines(self, value):
+		self.repository_stats['total_lines'] = value
+		
+	@property
+	def total_lines_added(self):
+		return self.repository_stats['total_lines_added']
+		
+	@total_lines_added.setter
+	def total_lines_added(self, value):
+		self.repository_stats['total_lines_added'] = value
+		
+	@property
+	def total_lines_removed(self):
+		return self.repository_stats['total_lines_removed']
+		
+	@total_lines_removed.setter
+	def total_lines_removed(self, value):
+		self.repository_stats['total_lines_removed'] = value
+		
+	@property
+	def total_size(self):
+		return self.repository_stats['total_size']
+		
+	@total_size.setter
+	def total_size(self, value):
+		self.repository_stats['total_size'] = value
+		
+	@property
+	def first_commit_stamp(self):
+		return self.repository_stats['first_commit_stamp']
+		
+	@first_commit_stamp.setter
+	def first_commit_stamp(self, value):
+		self.repository_stats['first_commit_stamp'] = value
+		
+	@property
+	def last_commit_stamp(self):
+		return self.repository_stats['last_commit_stamp']
+		
+	@last_commit_stamp.setter
+	def last_commit_stamp(self, value):
+		self.repository_stats['last_commit_stamp'] = value
+		
+	@property
+	def last_active_day(self):
+		return self.repository_stats['last_active_day']
+		
+	@last_active_day.setter
+	def last_active_day(self, value):
+		self.repository_stats['last_active_day'] = value
+		
+	@property
+	def active_days(self):
+		return self.repository_stats['active_days']
+		
+	@property
+	def repository_size_mb(self):
+		return self.repository_stats['repository_size_mb']
+		
+	@repository_size_mb.setter
+	def repository_size_mb(self, value):
+		self.repository_stats['repository_size_mb'] = value
 
-		# extensions
-		self.extensions = {} # extension -> files, lines
+	# Temporal data properties
+	@property
+	def author_of_month(self):
+		return self.temporal_data['author_of_month']
+		
+	@property
+	def author_of_year(self):
+		return self.temporal_data['author_of_year']
+		
+	@property
+	def commits_by_month(self):
+		return self.temporal_data['commits_by_month']
+		
+	@property
+	def commits_by_year(self):
+		return self.temporal_data['commits_by_year']
+		
+	@property
+	def lines_added_by_month(self):
+		return self.temporal_data['lines_added_by_month']
+		
+	@property
+	def lines_added_by_year(self):
+		return self.temporal_data['lines_added_by_year']
+		
+	@property
+	def lines_removed_by_month(self):
+		return self.temporal_data['lines_removed_by_month']
+		
+	@property
+	def lines_removed_by_year(self):
+		return self.temporal_data['lines_removed_by_year']
+		
+	@property
+	def lines_added_by_author_by_year(self):
+		return self.temporal_data['lines_added_by_author_by_year']
+		
+	@property
+	def commits_by_author_by_year(self):
+		return self.temporal_data['commits_by_author_by_year']
+		
+	@property
+	def files_by_year(self):
+		return self.temporal_data['files_by_year']
+		
+	@property
+	def files_by_stamp(self):
+		return self.temporal_data['files_by_stamp']
+		
+	@property
+	def changes_by_date(self):
+		return self.temporal_data['changes_by_date']
+		
+	@property
+	def pace_of_changes(self):
+		return self.temporal_data['pace_of_changes']
+		
+	@property
+	def pace_of_changes_by_month(self):
+		return self.temporal_data['pace_of_changes_by_month']
+		
+	@property
+	def pace_of_changes_by_year(self):
+		return self.temporal_data['pace_of_changes_by_year']
 
-		# line statistics
-		self.changes_by_date = {} # stamp -> { files, ins, del }
+	# Recent activity properties
+	@property
+	def last_30_days_commits(self):
+		return self.recent_activity['last_30_days_commits']
 		
-		# Pace of Changes tracking (number of line changes happening over time)
-		self.pace_of_changes = {} # stamp -> total_line_changes (ins + del)
-		self.pace_of_changes_by_month = defaultdict(int) # month -> total_line_changes (ins + del)
-		self.pace_of_changes_by_year = defaultdict(int) # year -> total_line_changes (ins + del)
+	@last_30_days_commits.setter
+	def last_30_days_commits(self, value):
+		self.recent_activity['last_30_days_commits'] = value
 		
-		# Last 30 days activity
-		self.last_30_days_commits = 0
-		self.last_30_days_lines_added = 0
-		self.last_30_days_lines_removed = 0
+	@property
+	def last_30_days_lines_added(self):
+		return self.recent_activity['last_30_days_lines_added']
 		
-		# Last 12 months activity  
-		self.last_12_months_commits = defaultdict(int) # month -> commits
-		self.last_12_months_lines_added = defaultdict(int) # month -> lines added
-		self.last_12_months_lines_removed = defaultdict(int) # month -> lines removed
+	@last_30_days_lines_added.setter
+	def last_30_days_lines_added(self, value):
+		self.recent_activity['last_30_days_lines_added'] = value
 		
-		# File count tracking by year  
-		self.files_by_year = defaultdict(int) # year -> max_file_count
+	@property
+	def last_30_days_lines_removed(self):
+		return self.recent_activity['last_30_days_lines_removed']
 		
-		# Lines of code tracking by year
-		self.lines_of_code_by_year = defaultdict(int) # year -> total_lines
+	@last_30_days_lines_removed.setter
+	def last_30_days_lines_removed(self, value):
+		self.recent_activity['last_30_days_lines_removed'] = value
 		
-		# Author yearly data
-		self.lines_added_by_author_by_year = defaultdict(lambda: defaultdict(int)) # year -> author -> lines_added
-		self.commits_by_author_by_year = defaultdict(lambda: defaultdict(int)) # year -> author -> commits
+	@property
+	def last_12_months_commits(self):
+		return self.recent_activity['last_12_months_commits']
 		
-		# Repository size tracking
-		self.repository_size_mb = 0.0
+	@property
+	def last_12_months_lines_added(self):
+		return self.recent_activity['last_12_months_lines_added']
 		
-		# Branch analysis
-		self.branches = {} # branch_name -> {'commits': 0, 'lines_added': 0, 'lines_removed': 0, 'authors': {}, 'is_merged': True, 'merge_base': '', 'unique_commits': []}
-		self.unmerged_branches = [] # list of branch names that are not merged into main branch
-		self.main_branch = 'master' # will be detected automatically
+	@property
+	def last_12_months_lines_removed(self):
+		return self.recent_activity['last_12_months_lines_removed']
+
+	# Code analysis properties
+	@property
+	def total_source_lines(self):
+		return self.code_analysis['total_source_lines']
 		
-		# Team collaboration analysis
-		self.author_collaboration = {} # author -> {'worked_with': {other_author: shared_files}, 'file_ownership': {file: change_count}}
-		self.commit_patterns = {} # author -> {'avg_commit_size': lines, 'small_commits': count, 'large_commits': count, 'commit_frequency': commits_per_day}
-		self.working_patterns = {} # author -> {'night_commits': count, 'weekend_commits': count, 'peak_hours': [hours], 'timezone_pattern': {tz: count}}
-		self.impact_analysis = {} # author -> {'critical_files': [files], 'impact_score': score, 'bug_potential': score}
-		self.team_performance = {} # author -> {'efficiency_score': score, 'consistency': score, 'leadership_score': score}
+	@total_source_lines.setter
+	def total_source_lines(self, value):
+		self.code_analysis['total_source_lines'] = value
 		
-		# File importance tracking
-		self.critical_files = set() # Files that are likely critical (main.py, app.py, index.html, etc.)
-		self.file_impact_scores = {} # file -> impact_score based on how often it's changed and by whom
+	@property
+	def total_comment_lines(self):
+		return self.code_analysis['total_comment_lines']
 		
-		# Time-based analysis
-		self.commits_by_time_of_day = defaultdict(lambda: defaultdict(int)) # author -> hour -> commits
-		self.commits_by_day_of_week = defaultdict(lambda: defaultdict(int)) # author -> day -> commits
-		self.author_active_periods = {} # author -> {'active_days': set, 'longest_streak': days, 'avg_gap': days}
+	@total_comment_lines.setter
+	def total_comment_lines(self, value):
+		self.code_analysis['total_comment_lines'] = value
 		
-		# Quality indicators
-		self.potential_bug_commits = [] # List of commits that might indicate bugs (reverts, fixes, etc.)
-		self.refactoring_commits = [] # List of commits that appear to be refactoring
-		self.feature_commits = [] # List of commits that appear to add features
+	@property
+	def total_blank_lines(self):
+		return self.code_analysis['total_blank_lines']
+		
+	@total_blank_lines.setter
+	def total_blank_lines(self, value):
+		self.code_analysis['total_blank_lines'] = value
+		
+	@property
+	def sloc_by_extension(self):
+		return self.code_analysis['sloc_by_extension']
+		
+	@property
+	def extensions(self):
+		return self.code_analysis['extensions']
+		
+	@property
+	def file_sizes(self):
+		return self.code_analysis['file_sizes']
+		
+	@property
+	def file_revisions(self):
+		return self.code_analysis['file_revisions']
+		
+	@property
+	def directories(self):
+		return self.code_analysis['directories']
+		
+	@property
+	def directory_revisions(self):
+		return self.code_analysis['directory_revisions']
+
+	# Project health properties
+	@property
+	def documentation_metrics(self):
+		return self.project_health['documentation_quality']
+		
+	@property
+	def code_quality_metrics(self):
+		return self.project_health['code_quality']
+		
+	@property
+	def collaboration_metrics(self):
+		return self.project_health['collaboration']
+		
+	@property
+	def file_analysis(self):
+		return {
+			'file_types': self.code_analysis['file_types'],
+			'large_files': self.code_analysis['large_files'],
+			'complex_files': self.code_analysis['complex_files'],
+			'hot_files': self.code_analysis['hot_files']
+		}
+
+	# Branch analysis properties
+	@property
+	def branches(self):
+		return self.branch_analysis['branches']
+		
+	@property
+	def unmerged_branches(self):
+		return self.branch_analysis['unmerged_branches']
+		
+	@property
+	def main_branch(self):
+		return self.branch_analysis['main_branch']
+		
+	@main_branch.setter
+	def main_branch(self, value):
+		self.branch_analysis['main_branch'] = value
+
+	# Team analysis properties
+	@property
+	def author_collaboration(self):
+		return self.team_analysis['author_collaboration']
+		
+	@property
+	def commit_patterns(self):
+		return self.team_analysis['commit_patterns']
+		
+	@property
+	def working_patterns(self):
+		return self.team_analysis['working_patterns']
+		
+	@property
+	def impact_analysis(self):
+		return self.team_analysis['impact_analysis']
+		
+	@property
+	def team_performance(self):
+		return self.team_analysis['team_performance']
+		
+	@property
+	def critical_files(self):
+		return self.team_analysis['critical_files']
+		
+	@property
+	def file_impact_scores(self):
+		return self.team_analysis['file_impact_scores']
+		
+	@property
+	def author_active_periods(self):
+		return self.team_analysis['author_active_periods']
+
+	# Commit categorization properties
+	@property
+	def potential_bug_commits(self):
+		return self.commit_categories['bug_commits']
+		
+	@property
+	def refactoring_commits(self):
+		return self.commit_categories['refactoring_commits']
+		
+	@property
+	def feature_commits(self):
+		return self.commit_categories['feature_commits']
 
 	##
 	# This should be the main function to extract data from the repository.
@@ -750,20 +1175,20 @@ class DataCollector:
 	
 	def calculate_documentation_quality(self):
 		"""Calculate documentation quality metrics (12% weight priority)"""
-		if self.total_lines == 0:
+		if self.repository_stats['total_lines'] == 0:
 			return 0.0
 			
-		comment_density = (self.documentation_metrics['total_comment_lines'] / self.total_lines) * 100
+		doc_metrics = self.project_health['documentation_quality']
+		comment_density = (doc_metrics['comment_lines'] / self.repository_stats['total_lines']) * 100
 		
 		# API documentation coverage
-		if self.documentation_metrics['total_functions'] > 0:
-			api_coverage = (self.documentation_metrics['api_documented_functions'] / 
-						   self.documentation_metrics['total_functions']) * 100
+		if doc_metrics['total_functions'] > 0:
+			api_coverage = (doc_metrics['documented_functions'] / doc_metrics['total_functions']) * 100
 		else:
 			api_coverage = 0
 		
 		# README quality (basic assessment)
-		readme_score = min(self.documentation_metrics['readme_sections'] * 20, 100)
+		readme_score = min(doc_metrics['readme_sections'] * 20, 100)
 		
 		# Weighted documentation score
 		doc_score = (comment_density * 0.4 + api_coverage * 0.4 + readme_score * 0.2)
@@ -801,8 +1226,8 @@ class DataCollector:
 		scores = []
 		
 		# Complexity score (lower is better)
-		if self.total_files > 0:
-			avg_complexity = self.code_quality_metrics['cyclomatic_complexity'] / self.total_files
+		if self.repository_stats['total_files'] > 0:
+			avg_complexity = self.project_health['code_quality']['cyclomatic_complexity'] / self.repository_stats['total_files']
 			complexity_score = max(0, 100 - (avg_complexity - 10) * 10)  # Penalize complexity > 10
 			scores.append(complexity_score)
 		
@@ -816,8 +1241,8 @@ class DataCollector:
 		scores.append(collaboration_score)
 		
 		# File organization score
-		if self.total_files > 0:
-			large_files_ratio = len(self.file_analysis['large_files']) / self.total_files
+		if self.repository_stats['total_files'] > 0:
+			large_files_ratio = len(self.code_analysis['large_files']) / self.repository_stats['total_files']
 			file_org_score = max(0, 100 - (large_files_ratio * 100))
 			scores.append(file_org_score)
 		
@@ -843,10 +1268,10 @@ class DataCollector:
 					complexity += 1
 				# Count function definitions
 				if line.startswith('def ') or line.startswith('function ') or 'function(' in line:
-					self.documentation_metrics['total_functions'] += 1
+					self.project_health['documentation_quality']['total_functions'] += 1
 					# Check for docstring/comments after function
 					if '"""' in content or "'''" in content or '/*' in content:
-						self.documentation_metrics['api_documented_functions'] += 1
+						self.project_health['documentation_quality']['documented_functions'] += 1
 			
 			return complexity
 			
@@ -862,11 +1287,11 @@ class DataCollector:
 			
 			# File type analysis
 			ext = os.path.splitext(filepath)[1].lower()
-			self.file_analysis['file_types'][ext] += 1
+			self.code_analysis['file_types'][ext] += 1
 			
 			# Large files detection (>500 LOC)
 			if len(lines) > 500:
-				self.file_analysis['large_files'].append(filepath)
+				self.code_analysis['large_files'].append(filepath)
 			
 			# Documentation analysis
 			comment_lines = 0
@@ -877,14 +1302,14 @@ class DataCollector:
 				if '"""' in line or "'''" in line:
 					comment_lines += 1
 			
-			self.documentation_metrics['total_comment_lines'] += comment_lines
+			self.project_health['documentation_quality']['comment_lines'] += comment_lines
 			
 			# Complexity analysis
 			complexity = self.analyze_file_complexity(filepath)
-			self.code_quality_metrics['cyclomatic_complexity'] += complexity
+			self.project_health['code_quality']['cyclomatic_complexity'] += complexity
 			
 			if complexity > 20:  # High complexity threshold
-				self.file_analysis['complex_files'].append(filepath)
+				self.code_analysis['complex_files'].append(filepath)
 			
 		except Exception as e:
 			pass  # Skip files that can't be read
@@ -905,24 +1330,24 @@ class DataCollector:
 		scores['collaboration'] = collaboration_score * 0.15
 		
 		# 4. Project Activity (10% weight)
-		if self.total_commits > 0:
+		if self.repository_stats['total_commits'] > 0:
 			# More commits in recent period = better activity
-			activity_score = min((self.total_commits / 10) * 10, 100)
+			activity_score = min((self.repository_stats['total_commits'] / 10) * 10, 100)
 		else:
 			activity_score = 0
 		scores['activity'] = activity_score * 0.10
 		
 		# 5. File Organization (8% weight)
-		if self.total_files > 0:
-			large_files_penalty = len(self.file_analysis['large_files']) / self.total_files
+		if self.repository_stats['total_files'] > 0:
+			large_files_penalty = len(self.code_analysis['large_files']) / self.repository_stats['total_files']
 			org_score = max(0, 100 - (large_files_penalty * 50))
 		else:
 			org_score = 50
 		scores['organization'] = org_score * 0.08
 		
 		# 6. Basic Technical Metrics (35% weight - remaining)
-		if self.total_lines > 0:
-			lines_per_commit = self.total_lines / max(self.total_commits, 1)
+		if self.repository_stats['total_lines'] > 0:
+			lines_per_commit = self.repository_stats['total_lines'] / max(self.repository_stats['total_commits'], 1)
 			# Reasonable lines per commit (not too high, not too low)
 			technical_score = max(0, 100 - abs(lines_per_commit - 50))
 		else:
@@ -955,10 +1380,10 @@ class DataCollector:
 		if scores['collaboration'] < 10:
 			self.project_health['actionable_issues'].append('Increase team collaboration - current bus factor too low')
 		
-		if len(self.file_analysis['large_files']) > 5:
+		if len(self.code_analysis['large_files']) > 5:
 			self.project_health['actionable_issues'].append('Consider breaking down large files (>500 LOC)')
 		
-		if len(self.file_analysis['complex_files']) > 3:
+		if len(self.code_analysis['complex_files']) > 3:
 			self.project_health['actionable_issues'].append('Reduce complexity in identified complex files')
 		
 		return total_score
@@ -1120,22 +1545,22 @@ class GitDataCollector(DataCollector):
 			date = datetime.datetime.fromtimestamp(float(stamp))
 
 			# First and last commit stamp (may be in any order because of cherry-picking and patches)
-			if stamp > self.last_commit_stamp:
-				self.last_commit_stamp = stamp
-			if self.first_commit_stamp == 0 or stamp < self.first_commit_stamp:
-				self.first_commit_stamp = stamp
+			if stamp > self.repository_stats['last_commit_stamp']:
+				self.repository_stats['last_commit_stamp'] = stamp
+			if self.repository_stats['first_commit_stamp'] == 0 or stamp < self.repository_stats['first_commit_stamp']:
+				self.repository_stats['first_commit_stamp'] = stamp
 
 			# activity
 			# hour
 			hour = date.hour
-			self.activity_by_hour_of_day[hour] += 1
+			self.activity_metrics['by_hour_of_day'][hour] += 1
 			# most active hour?
-			if self.activity_by_hour_of_day[hour] > self.activity_by_hour_of_day_busiest:
-				self.activity_by_hour_of_day_busiest = self.activity_by_hour_of_day[hour]
+			if self.activity_metrics['by_hour_of_day'][hour] > self.activity_metrics['hour_of_day_busiest']:
+				self.activity_metrics['hour_of_day_busiest'] = self.activity_metrics['by_hour_of_day'][hour]
 
 			# day of week
 			day = date.weekday()
-			self.activity_by_day_of_week[day] += 1
+			self.activity_metrics['by_day_of_week'][day] += 1
 
 			# domain stats
 			if domain not in self.domains:
@@ -1144,20 +1569,20 @@ class GitDataCollector(DataCollector):
 			self.domains[domain]['commits'] += 1
 
 			# hour of week  
-			self.activity_by_hour_of_week[day][hour] += 1
+			self.activity_metrics['by_hour_of_week'][day][hour] += 1
 			# most active hour?
-			if self.activity_by_hour_of_week[day][hour] > self.activity_by_hour_of_week_busiest:
-				self.activity_by_hour_of_week_busiest = self.activity_by_hour_of_week[day][hour]
+			if self.activity_metrics['by_hour_of_week'][day][hour] > self.activity_metrics['hour_of_week_busiest']:
+				self.activity_metrics['hour_of_week_busiest'] = self.activity_metrics['by_hour_of_week'][day][hour]
 
 			# month of year
 			month = date.month
-			self.activity_by_month_of_year[month] += 1
+			self.activity_metrics['by_month_of_year'][month] += 1
 
 			# yearly/weekly activity
 			yyw = date.strftime('%Y-%W')
-			self.activity_by_year_week[yyw] += 1
-			if self.activity_by_year_week_peak < self.activity_by_year_week[yyw]:
-				self.activity_by_year_week_peak = self.activity_by_year_week[yyw]
+			self.activity_metrics['by_year_week'][yyw] += 1
+			if self.activity_metrics['year_week_peak'] < self.activity_metrics['by_year_week'][yyw]:
+				self.activity_metrics['year_week_peak'] = self.activity_metrics['by_year_week'][yyw]
 
 			# author stats
 			if author not in self.authors:
@@ -1174,12 +1599,12 @@ class GitDataCollector(DataCollector):
 
 			# author of the month/year
 			yymm = date.strftime('%Y-%m')
-			self.author_of_month[yymm][author] += 1
-			self.commits_by_month[yymm] += 1
+			self.temporal_data['author_of_month'][yymm][author] += 1
+			self.temporal_data['commits_by_month'][yymm] += 1
 
 			yy = date.year
-			self.author_of_year[yy][author] += 1
-			self.commits_by_year[yy] += 1
+			self.temporal_data['author_of_year'][yy][author] += 1
+			self.temporal_data['commits_by_year'][yy] += 1
 
 			# authors: active days
 			yymmdd = date.strftime('%Y-%m-%d')
@@ -1191,9 +1616,9 @@ class GitDataCollector(DataCollector):
 				self.authors[author]['active_days'].add(yymmdd)
 
 			# project: active days
-			if yymmdd != self.last_active_day:
-				self.last_active_day = yymmdd
-				self.active_days.add(yymmdd)
+			if yymmdd != self.repository_stats['last_active_day']:
+				self.repository_stats['last_active_day'] = yymmdd
+				self.repository_stats['active_days'].add(yymmdd)
 
 			# timezone
 			self.commits_by_timezone[timezone] += 1
@@ -1238,7 +1663,7 @@ class GitDataCollector(DataCollector):
 			self.cache['files_in_tree'][rev] = count
 			lines.append('%d %d' % (int(time), count))
 
-		self.total_commits += len(lines)
+		self.repository_stats['total_commits'] += len(lines)
 		for line in lines:
 			parts = line.split(' ')
 			if len(parts) != 2:
@@ -1247,13 +1672,13 @@ class GitDataCollector(DataCollector):
 			try:
 				timestamp = int(stamp)
 				file_count = int(files)
-				self.files_by_stamp[timestamp] = file_count
+				self.temporal_data['files_by_stamp'][timestamp] = file_count
 				
 				# Track files by year (use max file count per year)
 				date = datetime.datetime.fromtimestamp(timestamp)
 				year = date.year
-				if year not in self.files_by_year or file_count > self.files_by_year[year]:
-					self.files_by_year[year] = file_count
+				if year not in self.temporal_data['files_by_year'] or file_count > self.temporal_data['files_by_year'][year]:
+					self.temporal_data['files_by_year'][year] = file_count
 			except ValueError:
 				print('Warning: failed to parse line "%s"' % line)
 
@@ -1280,11 +1705,11 @@ class GitDataCollector(DataCollector):
 					print(f'Skipping file (extension not in allowed list): {fullpath}')
 				continue
 
-			self.total_size += size
-			self.total_files += 1
+			self.repository_stats['total_size'] += size
+			self.repository_stats['total_files'] += 1
 			
 			# Track individual file sizes
-			self.file_sizes[fullpath] = size
+			self.code_analysis['file_sizes'][fullpath] = size
 
 			if filename.find('.') == -1 or filename.rfind('.') == 0:
 				ext = ''
@@ -1292,9 +1717,9 @@ class GitDataCollector(DataCollector):
 				ext = filename[(filename.rfind('.') + 1):]
 			if len(ext) > conf['max_ext_length']:
 				ext = ''
-			if ext not in self.extensions:
-				self.extensions[ext] = {'files': 0, 'lines': 0}
-			self.extensions[ext]['files'] += 1
+			if ext not in self.code_analysis['extensions']:
+				self.code_analysis['extensions'][ext] = {'files': 0, 'lines': 0}
+			self.code_analysis['extensions'][ext]['files'] += 1
 			
 			# Add all blobs to SLOC analysis list (regardless of cache status)
 			all_blobs_for_sloc.append((ext, blob_id))
@@ -1305,7 +1730,7 @@ class GitDataCollector(DataCollector):
 				blobs_to_read.append((ext,blob_id))
 				continue
 			if blob_id in self.cache['lines_in_blob']:
-				self.extensions[ext]['lines'] += self.cache['lines_in_blob'][blob_id]
+				self.code_analysis['extensions'][ext]['lines'] += self.cache['lines_in_blob'][blob_id]
 			else:
 				blobs_to_read.append((ext,blob_id))
 
@@ -1336,27 +1761,27 @@ class GitDataCollector(DataCollector):
 			if 'lines_in_blob' not in self.cache:
 				self.cache['lines_in_blob'] = {}
 			self.cache['lines_in_blob'][blob_id] = linecount
-			self.extensions[ext]['lines'] += self.cache['lines_in_blob'][blob_id]
+			self.code_analysis['extensions'][ext]['lines'] += self.cache['lines_in_blob'][blob_id]
 
 		# Update SLOC statistics
 		for (ext, blob_id, total_lines, source_lines, comment_lines, blank_lines) in ext_blob_sloc:
 			# Initialize extension SLOC tracking
-			if ext not in self.sloc_by_extension:
-				self.sloc_by_extension[ext] = {'source': 0, 'comments': 0, 'blank': 0, 'total': 0}
+			if ext not in self.code_analysis['sloc_by_extension']:
+				self.code_analysis['sloc_by_extension'][ext] = {'source': 0, 'comments': 0, 'blank': 0, 'total': 0}
 			
 			# Update extension SLOC counts
-			self.sloc_by_extension[ext]['source'] += source_lines
-			self.sloc_by_extension[ext]['comments'] += comment_lines
-			self.sloc_by_extension[ext]['blank'] += blank_lines
-			self.sloc_by_extension[ext]['total'] += total_lines
+			self.code_analysis['sloc_by_extension'][ext]['source'] += source_lines
+			self.code_analysis['sloc_by_extension'][ext]['comments'] += comment_lines
+			self.code_analysis['sloc_by_extension'][ext]['blank'] += blank_lines
+			self.code_analysis['sloc_by_extension'][ext]['total'] += total_lines
 			
 			# Update global SLOC counts
-			self.total_source_lines += source_lines
-			self.total_comment_lines += comment_lines
-			self.total_blank_lines += blank_lines
+			self.code_analysis['total_source_lines'] += source_lines
+			self.code_analysis['total_comment_lines'] += comment_lines
+			self.code_analysis['total_blank_lines'] += blank_lines
 			
 			# Update enhanced documentation metrics
-			self.documentation_metrics['total_comment_lines'] += comment_lines
+			self.project_health['documentation_quality']['comment_lines'] += comment_lines
 
 		# File revision counting
 		print('Collecting file revision statistics...')
@@ -1372,14 +1797,14 @@ class GitDataCollector(DataCollector):
 				if not should_include_file(filename):
 					continue
 				
-				if line not in self.file_revisions:
-					self.file_revisions[line] = 0
-				self.file_revisions[line] += 1
+				if line not in self.code_analysis['file_revisions']:
+					self.code_analysis['file_revisions'][line] = 0
+				self.code_analysis['file_revisions'][line] += 1
 				
 				# Track directory activity
 				directory = os.path.dirname(line) if os.path.dirname(line) else '.'
-				self.directory_revisions[directory] += 1
-				self.directories[directory]['files'].add(line)
+				self.code_analysis['directory_revisions'][directory] += 1
+				self.code_analysis['directories'][directory]['files'].add(line)
 
 		# Directory activity analysis
 		print('Collecting directory activity statistics...')
@@ -1419,10 +1844,10 @@ class GitDataCollector(DataCollector):
 						
 						# Track directory activity
 						directory = os.path.dirname(filename) if os.path.dirname(filename) else '.'
-						self.directories[directory]['commits'] += 1  # Will be deduplicated later
-						self.directories[directory]['lines_added'] += additions
-						self.directories[directory]['lines_removed'] += deletions
-						self.directories[directory]['files'].add(filename)
+						self.code_analysis['directories'][directory]['commits'] += 1  # Will be deduplicated later
+						self.code_analysis['directories'][directory]['lines_added'] += additions
+						self.code_analysis['directories'][directory]['lines_removed'] += deletions
+						self.code_analysis['directories'][directory]['files'].add(filename)
 					except ValueError:
 						pass
 
@@ -1430,7 +1855,7 @@ class GitDataCollector(DataCollector):
 		# outputs:
 		#  N files changed, N insertions (+), N deletions(-)
 		# <stamp> <author>
-		self.changes_by_date = {} # stamp -> { files, ins, del }
+		self.temporal_data['changes_by_date'] = {} # stamp -> { files, ins, del }
 		# computation of lines of code by date is better done
 		# on a linear history.
 		extra = ''
@@ -1458,41 +1883,41 @@ class GitDataCollector(DataCollector):
 				if pos != -1:
 					try:
 						(stamp, author) = (int(line[:pos]), line[pos+1:])
-						self.changes_by_date[stamp] = { 'files': files, 'ins': inserted, 'del': deleted, 'lines': total_lines }
+						self.temporal_data['changes_by_date'][stamp] = { 'files': files, 'ins': inserted, 'del': deleted, 'lines': total_lines }
 						
 						# Track pace of changes (total line changes)
-						self.pace_of_changes[stamp] = inserted + deleted
+						self.temporal_data['pace_of_changes'][stamp] = inserted + deleted
 
 						date = datetime.datetime.fromtimestamp(stamp)
 						
 						# Track pace of changes by month and year
 						yymm = date.strftime('%Y-%m')
 						yy = date.year
-						self.pace_of_changes_by_month[yymm] += inserted + deleted
-						self.pace_of_changes_by_year[yy] += inserted + deleted
+						self.temporal_data['pace_of_changes_by_month'][yymm] += inserted + deleted
+						self.temporal_data['pace_of_changes_by_year'][yy] += inserted + deleted
 						
 						# Track last 30 days activity
 						import time as time_mod
 						now = time_mod.time()
 						if now - stamp <= 30 * 24 * 3600:  # 30 days in seconds
-							self.last_30_days_commits += 1
-							self.last_30_days_lines_added += inserted
-							self.last_30_days_lines_removed += deleted
+							self.recent_activity['last_30_days_commits'] += 1
+							self.recent_activity['last_30_days_lines_added'] += inserted
+							self.recent_activity['last_30_days_lines_removed'] += deleted
 						
 						# Track last 12 months activity
 						if now - stamp <= 365 * 24 * 3600:  # 12 months in seconds
 							yymm = date.strftime('%Y-%m')
-							self.last_12_months_commits[yymm] += 1
-							self.last_12_months_lines_added[yymm] += inserted
-							self.last_12_months_lines_removed[yymm] += deleted
+							self.recent_activity['last_12_months_commits'][yymm] += 1
+							self.recent_activity['last_12_months_lines_added'][yymm] += inserted
+							self.recent_activity['last_12_months_lines_removed'][yymm] += deleted
 						
 						yymm = date.strftime('%Y-%m')
-						self.lines_added_by_month[yymm] += inserted
-						self.lines_removed_by_month[yymm] += deleted
+						self.temporal_data['lines_added_by_month'][yymm] += inserted
+						self.temporal_data['lines_removed_by_month'][yymm] += deleted
 
 						yy = date.year
-						self.lines_added_by_year[yy] += inserted
-						self.lines_removed_by_year[yy] += deleted
+						self.temporal_data['lines_added_by_year'][yy] += inserted
+						self.temporal_data['lines_removed_by_year'][yy] += deleted
 
 						files, inserted, deleted = 0, 0, 0
 					except ValueError:
@@ -1506,14 +1931,14 @@ class GitDataCollector(DataCollector):
 					(files, inserted, deleted) = list(map(lambda el : int(el), numbers))
 					total_lines += inserted
 					total_lines -= deleted
-					self.total_lines_added += inserted
-					self.total_lines_removed += deleted
+					self.repository_stats['total_lines_added'] += inserted
+					self.repository_stats['total_lines_removed'] += deleted
 
 				else:
 					print('Warning: failed to handle line "%s"' % line)
 					(files, inserted, deleted) = (0, 0, 0)
 				#self.changes_by_date[stamp] = { 'files': files, 'ins': inserted, 'del': deleted }
-		self.total_lines += total_lines
+		self.repository_stats['total_lines'] += total_lines
 
 		# Per-author statistics
 
@@ -1557,8 +1982,8 @@ class GitDataCollector(DataCollector):
 						# Track author data by year
 						date = datetime.datetime.fromtimestamp(stamp)
 						year = date.year
-						self.lines_added_by_author_by_year[year][author] += inserted
-						self.commits_by_author_by_year[year][author] += 1
+						self.temporal_data['lines_added_by_author_by_year'][year][author] += inserted
+						self.temporal_data['commits_by_author_by_year'][year][author] += 1
 						files, inserted, deleted = 0, 0, 0
 					except ValueError:
 						print('Warning: unexpected line "%s"' % line)
@@ -1961,7 +2386,7 @@ class GitDataCollector(DataCollector):
 				refactor_related = sum(1 for c in commits if any(keyword in c['message'].lower() 
 					for keyword in ['refactor', 'cleanup', 'reorganize', 'restructure', 'optimize']))
 				
-				self.commit_patterns[author] = {
+				self.team_analysis['commit_patterns'][author] = {
 					'total_commits': total_commits,
 					'avg_commit_size': avg_commit_size,
 					'small_commits': small_commits,
@@ -2011,8 +2436,8 @@ class GitDataCollector(DataCollector):
 				day_of_week = date.weekday()  # Monday = 0, Sunday = 6
 				
 				# Initialize author working patterns
-				if author not in self.working_patterns:
-					self.working_patterns[author] = {
+				if author not in self.team_analysis['working_patterns']:
+					self.team_analysis['working_patterns'][author] = {
 						'night_commits': 0,      # 22:00 - 06:00
 						'weekend_commits': 0,    # Saturday, Sunday
 						'peak_hours': defaultdict(int),
@@ -2024,33 +2449,33 @@ class GitDataCollector(DataCollector):
 						'total_commits': 0
 					}
 				
-				self.working_patterns[author]['total_commits'] += 1
-				self.working_patterns[author]['peak_hours'][hour] += 1
-				self.working_patterns[author]['peak_days'][day_of_week] += 1
+				self.team_analysis['working_patterns'][author]['total_commits'] += 1
+				self.team_analysis['working_patterns'][author]['peak_hours'][hour] += 1
+				self.team_analysis['working_patterns'][author]['peak_days'][day_of_week] += 1
 				
 				# Extract timezone from date string
 				if '+' in date_str or '-' in date_str:
 					tz_part = date_str.split()[-1]
-					self.working_patterns[author]['timezone_pattern'][tz_part] += 1
+					self.team_analysis['working_patterns'][author]['timezone_pattern'][tz_part] += 1
 				
 				# Categorize by time of day
 				if 22 <= hour or hour < 6:
-					self.working_patterns[author]['night_commits'] += 1
+					self.team_analysis['working_patterns'][author]['night_commits'] += 1
 				elif 5 <= hour < 9:
-					self.working_patterns[author]['early_bird'] += 1
+					self.team_analysis['working_patterns'][author]['early_bird'] += 1
 				elif 9 <= hour < 17:
-					self.working_patterns[author]['workday'] += 1
+					self.team_analysis['working_patterns'][author]['workday'] += 1
 				elif 17 <= hour < 22:
-					self.working_patterns[author]['evening'] += 1
+					self.team_analysis['working_patterns'][author]['evening'] += 1
 				
 				# Weekend commits (Saturday = 5, Sunday = 6)
 				if day_of_week >= 5:
-					self.working_patterns[author]['weekend_commits'] += 1
+					self.team_analysis['working_patterns'][author]['weekend_commits'] += 1
 				
 				# Classify commit types
 				if any(keyword in message.lower() for keyword in ['fix', 'bug', 'error', 'patch']):
-					if author not in self.potential_bug_commits:
-						self.potential_bug_commits.append({'author': author, 'timestamp': timestamp, 'message': message})
+					if author not in self.commit_categories['bug_commits']:
+						self.commit_categories['bug_commits'].append({'author': author, 'timestamp': timestamp, 'message': message})
 				elif any(keyword in message.lower() for keyword in ['refactor', 'cleanup', 'optimize']):
 					self.refactoring_commits.append({'author': author, 'timestamp': timestamp, 'message': message})
 				elif any(keyword in message.lower() for keyword in ['add', 'new', 'feature', 'implement']):
@@ -2189,7 +2614,7 @@ class GitDataCollector(DataCollector):
 						total_impact_score += self.file_impact_scores.get(filename, 0)
 				
 				# Calculate bug potential based on commit messages and patterns
-				author_commits = self.commit_patterns.get(author, {})
+				author_commits = self.team_analysis['commit_patterns'].get(author, {})
 				bug_commits = author_commits.get('bug_related_commits', 0)
 				total_commits = author_commits.get('total_commits', 1)
 				bug_ratio = bug_commits / total_commits if total_commits > 0 else 0
@@ -2215,12 +2640,12 @@ class GitDataCollector(DataCollector):
 		
 		try:
 			total_commits = self.getTotalCommits()
-			total_lines_changed = self.total_lines_added + self.total_lines_removed
+			total_lines_changed = self.repository_stats['total_lines_added'] + self.repository_stats['total_lines_removed']
 			
 			for author in self.authors:
 				author_info = self.authors[author]
-				commit_patterns = self.commit_patterns.get(author, {})
-				working_patterns = self.working_patterns.get(author, {})
+				commit_patterns = self.team_analysis['commit_patterns'].get(author, {})
+				working_patterns = self.team_analysis['working_patterns'].get(author, {})
 				impact_info = self.impact_analysis.get(author, {})
 				
 				# Efficiency Score (based on lines changed per commit and commit quality)
@@ -2366,16 +2791,16 @@ class GitDataCollector(DataCollector):
 		return self.total_authors
 	
 	def getTotalCommits(self):
-		return self.total_commits
+		return self.repository_stats['total_commits']
 
 	def getTotalFiles(self):
-		return self.total_files
+		return self.repository_stats['total_files']
 	
 	def getTotalLOC(self):
-		return self.total_lines
+		return self.repository_stats['total_lines']
 
 	def getTotalSourceLines(self):
-		return self.total_source_lines
+		return self.code_analysis['total_source_lines']
 	
 	def getTotalCommentLines(self):
 		return self.total_comment_lines
@@ -2531,7 +2956,7 @@ class GitDataCollector(DataCollector):
 	
 	def getCommitPatternsForAuthor(self, author):
 		"""Get commit patterns for a specific author."""
-		return self.commit_patterns.get(author, {})
+		return self.team_analysis['commit_patterns'].get(author, {})
 	
 	def getWorkingPatterns(self):
 		"""Get working time patterns for all authors."""
