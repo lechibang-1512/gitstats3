@@ -1585,6 +1585,755 @@ class DataCollector:
 		
 		return optimized
 
+	def calculate_comprehensive_metrics(self, filepath):
+		"""Calculate comprehensive code metrics for a file including LOC, Halstead, and McCabe metrics."""
+		try:
+			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+				content = f.read()
+			
+			# Get file extension for language-specific analysis
+			ext = os.path.splitext(filepath)[1].lower()
+			
+			# Calculate all metrics
+			loc_metrics = self._calculate_loc_metrics(content, ext)
+			halstead_metrics = self._calculate_halstead_metrics(content, ext)
+			mccabe_metrics = self._calculate_mccabe_complexity(content, ext)
+			maintainability_index = self._calculate_maintainability_index(loc_metrics, halstead_metrics, mccabe_metrics)
+			
+			return {
+				'loc': loc_metrics,
+				'halstead': halstead_metrics,
+				'mccabe': mccabe_metrics,
+				'maintainability_index': maintainability_index,
+				'filepath': filepath,
+				'extension': ext
+			}
+			
+		except Exception as e:
+			if conf['debug']:
+				print(f'Warning: Failed to calculate metrics for {filepath}: {e}')
+			return None
+
+	def _calculate_loc_metrics(self, content, file_extension):
+		"""Calculate Lines-of-Code metrics (LOCphy, LOCbl, LOCpro, LOCcom)."""
+		lines = content.split('\n')
+		
+		# Initialize counters
+		loc_phy = len(lines)  # Physical lines
+		loc_bl = 0   # Blank lines
+		loc_pro = 0  # Program lines (declarations, definitions, directives, code)
+		loc_com = 0  # Comment lines
+		
+		# Language-specific comment patterns
+		comment_patterns = self._get_comment_patterns(file_extension)
+		
+		import re
+		in_multiline_comment = False
+		
+		for line in lines:
+			original_line = line
+			line_stripped = line.strip()
+			
+			# Check if line is blank
+			if not line_stripped:
+				loc_bl += 1
+				continue
+			
+			# Handle multi-line comments
+			if file_extension in ['.c', '.cpp', '.java', '.js', '.ts', '.css', '.h', '.hpp']:
+				if '/*' in line_stripped and '*/' in line_stripped:
+					# Single line /* */ comment
+					loc_com += 1
+					continue
+				elif '/*' in line_stripped:
+					in_multiline_comment = True
+					loc_com += 1
+					continue
+				elif '*/' in line_stripped:
+					in_multiline_comment = False
+					loc_com += 1
+					continue
+				elif in_multiline_comment:
+					loc_com += 1
+					continue
+			
+			# Check for single-line comments
+			is_comment = False
+			for pattern in comment_patterns:
+				if re.match(pattern, line_stripped):
+					loc_com += 1
+					is_comment = True
+					break
+			
+			# If not a comment or blank line, it's a program line
+			if not is_comment:
+				# Check for mixed lines (code + comment on same line)
+				has_code = True
+				
+				# Simple heuristic: if line starts with comment, it's a comment
+				# Otherwise, it's code (even if it has trailing comments)
+				for pattern in comment_patterns:
+					if re.match(pattern, line_stripped):
+						has_code = False
+						break
+				
+				if has_code:
+					loc_pro += 1
+		
+		return {
+			'loc_phy': loc_phy,
+			'loc_bl': loc_bl,
+			'loc_pro': loc_pro,
+			'loc_com': loc_com,
+			'comment_ratio': (loc_com / loc_phy * 100) if loc_phy > 0 else 0.0
+		}
+
+	def _get_comment_patterns(self, file_extension):
+		"""Get regex patterns for comments based on file extension."""
+		patterns = {
+			'.py': [r'^\s*#'],
+			'.js': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.ts': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.jsx': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.tsx': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.java': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.scala': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.kt': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.cpp': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.c': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.cc': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.cxx': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.h': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.hpp': [r'^\s*//', r'^\s*/\*', r'^\s*\*'],
+			'.go': [r'^\s*//'],
+			'.rs': [r'^\s*//', r'^\s*///'],
+			'.php': [r'^\s*//', r'^\s*/\*', r'^\s*\*', r'^\s*#'],
+			'.rb': [r'^\s*#'],
+			'.pl': [r'^\s*#'],
+			'.sh': [r'^\s*#'],
+			'.css': [r'^\s*/\*', r'^\s*\*'],
+			'.html': [r'^\s*<!--'],
+			'.xml': [r'^\s*<!--'],
+		}
+		
+		return patterns.get(file_extension, [r'^\s*#', r'^\s*//', r'^\s*/\*'])
+
+	def _calculate_halstead_metrics(self, content, file_extension):
+		"""Calculate Halstead complexity metrics."""
+		import re
+		
+		# Language-specific operators and operands patterns
+		operators, operand_patterns = self._get_halstead_patterns(file_extension)
+		
+		# Remove comments and strings to avoid false positives
+		cleaned_content = self._remove_comments_and_strings(content, file_extension)
+		
+		# Count operators
+		n1_dict = {}  # distinct operators
+		N1 = 0        # total operators
+		
+		for op in operators:
+			# Escape special regex characters
+			escaped_op = re.escape(op)
+			matches = re.findall(escaped_op, cleaned_content)
+			if matches:
+				count = len(matches)
+				n1_dict[op] = count
+				N1 += count
+		
+		# Count operands (identifiers, numbers, strings)
+		n2_dict = {}  # distinct operands
+		N2 = 0        # total operands
+		
+		# Find all potential operands
+		for pattern in operand_patterns:
+			matches = re.findall(pattern, cleaned_content)
+			for match in matches:
+				if isinstance(match, tuple):
+					match = match[0] if match[0] else match[1] if len(match) > 1 else ''
+				
+				if match and match not in n1_dict:  # Don't count operators as operands
+					if match in n2_dict:
+						n2_dict[match] += 1
+					else:
+						n2_dict[match] = 1
+					N2 += 1
+		
+		# Calculate base metrics
+		n1 = len(n1_dict)  # number of distinct operators
+		n2 = len(n2_dict)  # number of distinct operands
+		
+		# Calculate derived metrics
+		import math
+		
+		N = N1 + N2  # Program length
+		n = n1 + n2  # Vocabulary
+		
+		if n > 0 and N > 0:
+			V = N * math.log2(n)  # Program volume
+		else:
+			V = 0
+		
+		if n2 > 0 and n1 > 0:
+			D = (n1 / 2) * (N2 / n2)  # Difficulty
+		else:
+			D = 0
+		
+		L = 1 / D if D > 0 else 0  # Level
+		E = V * D if V > 0 and D > 0 else 0  # Effort
+		T = E / 18 if E > 0 else 0  # Time (seconds)
+		
+		if E > 0:
+			B = (E ** (2/3)) / 3000  # Estimated delivered bugs
+		else:
+			B = 0
+		
+		return {
+			'n1': n1,           # distinct operators
+			'n2': n2,           # distinct operands  
+			'N1': N1,           # total operators
+			'N2': N2,           # total operands
+			'N': N,             # program length
+			'n': n,             # vocabulary
+			'V': V,             # program volume
+			'D': D,             # difficulty
+			'L': L,             # level
+			'E': E,             # effort
+			'T': T,             # time
+			'B': B              # estimated bugs
+		}
+
+	def _get_halstead_patterns(self, file_extension):
+		"""Get operators and operand patterns for Halstead metrics based on file extension."""
+		
+		# Common operators for most C-like languages
+		common_operators = [
+			# Arithmetic
+			'+', '-', '*', '/', '%', '++', '--',
+			# Assignment
+			'=', '+=', '-=', '*=', '/=', '%=', 
+			# Comparison
+			'==', '!=', '<', '>', '<=', '>=',
+			# Logical
+			'&&', '||', '!',
+			# Bitwise
+			'&', '|', '^', '~', '<<', '>>',
+			# Other
+			'?', ':', ';', ',', '.', '->', 
+			# Brackets and parentheses
+			'(', ')', '[', ']', '{', '}',
+		]
+		
+		# Common operand patterns (identifiers, numbers, strings)
+		common_operand_patterns = [
+			r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b',  # identifiers
+			r'\b(\d+\.?\d*)\b',                # numbers
+			r'"([^"]*)"',                      # double-quoted strings
+			r"'([^']*)'",                      # single-quoted strings
+		]
+		
+		if file_extension == '.py':
+			operators = common_operators + [
+				'and', 'or', 'not', 'in', 'is', 'lambda', 
+				'if', 'elif', 'else', 'for', 'while', 'def', 'class',
+				'import', 'from', 'as', 'try', 'except', 'finally',
+				'with', 'yield', 'return', 'pass', 'break', 'continue'
+			]
+			
+		elif file_extension in ['.js', '.ts', '.jsx', '.tsx']:
+			operators = common_operators + [
+				'function', 'var', 'let', 'const', 'if', 'else', 'for', 'while',
+				'do', 'switch', 'case', 'default', 'break', 'continue',
+				'return', 'try', 'catch', 'finally', 'throw', 'new', 'delete',
+				'typeof', 'instanceof', 'this', '=>'
+			]
+			
+		elif file_extension in ['.java', '.scala', '.kt']:
+			operators = common_operators + [
+				'class', 'interface', 'extends', 'implements', 'public', 'private',
+				'protected', 'static', 'final', 'abstract', 'synchronized',
+				'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'default',
+				'break', 'continue', 'return', 'try', 'catch', 'finally',
+				'throw', 'throws', 'new', 'instanceof'
+			]
+			
+		elif file_extension in ['.cpp', '.c', '.cc', '.cxx', '.h', '.hpp']:
+			operators = common_operators + [
+				'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'default',
+				'break', 'continue', 'return', 'goto', 'sizeof',
+				'struct', 'union', 'enum', 'typedef', 'static', 'extern',
+				'const', 'volatile', 'auto', 'register'
+			]
+			
+		elif file_extension == '.go':
+			operators = common_operators + [
+				'func', 'var', 'const', 'type', 'struct', 'interface',
+				'if', 'else', 'for', 'switch', 'case', 'default',
+				'break', 'continue', 'return', 'go', 'select',
+				'package', 'import', 'defer'
+			]
+			
+		elif file_extension == '.rs':
+			operators = common_operators + [
+				'fn', 'let', 'mut', 'const', 'static', 'struct', 'enum', 'trait',
+				'impl', 'if', 'else', 'for', 'while', 'loop', 'match',
+				'break', 'continue', 'return', 'pub', 'use', 'mod'
+			]
+		else:
+			# Default to common operators
+			operators = common_operators
+		
+		return operators, common_operand_patterns
+
+	def _remove_comments_and_strings(self, content, file_extension):
+		"""Remove comments and string literals to avoid counting them in Halstead metrics."""
+		import re
+		
+		if file_extension == '.py':
+			# Remove Python comments and strings
+			content = re.sub(r'#.*$', '', content, flags=re.MULTILINE)
+			content = re.sub(r'""".*?"""', '', content, flags=re.DOTALL)
+			content = re.sub(r"'''.*?'''", '', content, flags=re.DOTALL)
+			content = re.sub(r'"[^"]*"', '', content)
+			content = re.sub(r"'[^']*'", '', content)
+			
+		elif file_extension in ['.js', '.ts', '.jsx', '.tsx', '.java', '.scala', '.kt', '.cpp', '.c', '.cc', '.cxx', '.h', '.hpp', '.go', '.rs']:
+			# Remove C-style comments and strings
+			content = re.sub(r'//.*$', '', content, flags=re.MULTILINE)
+			content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+			content = re.sub(r'"[^"]*"', '', content)
+			content = re.sub(r"'[^']*'", '', content)
+		
+		return content
+
+	def _calculate_mccabe_complexity(self, content, file_extension):
+		"""Calculate McCabe Cyclomatic Complexity v(G).
+		
+		Formula: v(G) = #binaryDecision + 1
+		Also: v(G) = #IFs + #LOOPs + 1
+		"""
+		import re
+		
+		# Remove comments and strings to avoid false positives
+		cleaned_content = self._remove_comments_and_strings(content, file_extension)
+		
+		# Language-specific binary decision patterns (IF statements and LOOPS)
+		if_patterns = []
+		loop_patterns = []
+		
+		if file_extension in ['.py']:
+			# Python patterns
+			if_patterns = [r'\bif\b', r'\belif\b']
+			loop_patterns = [r'\bwhile\b', r'\bfor\b']
+		elif file_extension in ['.js', '.ts', '.jsx', '.tsx']:
+			# JavaScript/TypeScript patterns  
+			if_patterns = [r'\bif\b', r'\belse\s+if\b']
+			loop_patterns = [r'\bwhile\b', r'\bfor\b', r'\bdo\b']
+		elif file_extension in ['.java', '.scala', '.kt']:
+			# Java/Scala/Kotlin patterns
+			if_patterns = [r'\bif\b', r'\belse\s+if\b']
+			loop_patterns = [r'\bwhile\b', r'\bfor\b', r'\bdo\b']
+		elif file_extension in ['.cpp', '.c', '.cc', '.cxx', '.h', '.hpp']:
+			# C/C++ patterns
+			if_patterns = [r'\bif\b', r'\belse\s+if\b']
+			loop_patterns = [r'\bwhile\b', r'\bfor\b', r'\bdo\b']
+		elif file_extension in ['.go']:
+			# Go patterns
+			if_patterns = [r'\bif\b', r'\belse\s+if\b']
+			loop_patterns = [r'\bfor\b']
+		elif file_extension in ['.rs']:
+			# Rust patterns
+			if_patterns = [r'\bif\b', r'\belse\s+if\b']
+			loop_patterns = [r'\bwhile\b', r'\bfor\b', r'\bloop\b']
+		else:
+			# Generic patterns for other languages
+			if_patterns = [r'\bif\b', r'\belse\s+if\b']
+			loop_patterns = [r'\bwhile\b', r'\bfor\b', r'\bdo\b']
+		
+		# Count IF statements
+		if_count = 0
+		for pattern in if_patterns:
+			matches = re.findall(pattern, cleaned_content, re.IGNORECASE)
+			if_count += len(matches)
+		
+		# Count LOOP statements  
+		loop_count = 0
+		for pattern in loop_patterns:
+			matches = re.findall(pattern, cleaned_content, re.IGNORECASE)
+			loop_count += len(matches)
+		
+		# Additional binary decisions: switch/case, try/catch, ternary operators, logical operators
+		additional_decisions = 0
+		
+		# Switch/case statements
+		if file_extension in ['.js', '.ts', '.jsx', '.tsx', '.java', '.scala', '.kt', '.c', '.cpp', '.cc', '.cxx', '.h', '.hpp']:
+			case_matches = re.findall(r'\bcase\b', cleaned_content, re.IGNORECASE)
+			additional_decisions += len(case_matches)
+		
+		# Ternary operators
+		ternary_matches = re.findall(r'\?.*:', cleaned_content)
+		additional_decisions += len(ternary_matches)
+		
+		# Logical operators (each && or || creates a binary decision)
+		logical_matches = re.findall(r'&&|\|\|', cleaned_content)
+		additional_decisions += len(logical_matches)
+		
+		# Exception handling
+		if file_extension in ['.py']:
+			except_matches = re.findall(r'\bexcept\b', cleaned_content, re.IGNORECASE)
+			additional_decisions += len(except_matches)
+		elif file_extension in ['.js', '.ts', '.jsx', '.tsx', '.java', '.scala', '.kt', '.c', '.cpp', '.cc', '.cxx']:
+			catch_matches = re.findall(r'\bcatch\b', cleaned_content, re.IGNORECASE)
+			additional_decisions += len(catch_matches)
+		
+		# Total binary decisions = IFs + LOOPs + additional decisions
+		binary_decisions = if_count + loop_count + additional_decisions
+		
+		# McCabe complexity v(G) = #binaryDecision + 1
+		complexity = binary_decisions + 1
+		
+		# Interpret complexity level (recommendations: function ≲ 15; file ≲ 100)
+		if complexity <= 15:
+			interpretation = 'simple'
+		elif complexity <= 25:
+			interpretation = 'moderate'  
+		elif complexity <= 50:
+			interpretation = 'complex'
+		else:
+			interpretation = 'very_complex'
+		
+		return {
+			'cyclomatic_complexity': complexity,
+			'binary_decisions': binary_decisions,
+			'if_count': if_count,
+			'loop_count': loop_count,
+			'additional_decisions': additional_decisions,
+			'interpretation': interpretation
+		}
+
+	def _calculate_maintainability_index(self, loc_metrics, halstead_metrics, mccabe_metrics):
+		"""Calculate Maintainability Index using LOC, Halstead, and McCabe metrics.
+		
+		Formula from slides:
+		MIwoc = 171 - 5.2 * ln(aveV) - 0.23 * aveG - 16.2 * ln(aveLOC)
+		MIcw = 50 * sin(√(2.4 * perCM))
+		MI = MIwoc + MIcw
+		"""
+		import math
+		
+		try:
+			# Extract required metrics - these are per module (file) averages
+			ave_v = halstead_metrics['V'] if halstead_metrics['V'] > 0 else 1  # Halstead Volume per module
+			ave_g = mccabe_metrics['cyclomatic_complexity']  # Cyclomatic complexity v(G) per module
+			ave_loc = loc_metrics['loc_phy']  # Physical LOC per module
+			per_cm = loc_metrics['comment_ratio']  # Comment ratio as percentage (0-100)
+			
+			# MIwoc = 171 - 5.2 * ln(aveV) - 0.23 * aveG - 16.2 * ln(aveLOC)
+			mi_woc = (171 - 
+					  5.2 * math.log(max(ave_v, 1)) - 
+					  0.23 * ave_g - 
+					  16.2 * math.log(max(ave_loc, 1)))
+			
+			# MIcw = 50 * sin(√(2.4 * perCM)) where perCM is percentage
+			mi_cw = 50 * math.sin(math.sqrt(2.4 * per_cm)) if per_cm >= 0 else 0
+			
+			# MI = MIwoc + MIcw
+			maintainability_index = mi_woc + mi_cw
+			
+			# Store raw value for analysis, but clamp for display
+			raw_maintainability_index = maintainability_index
+			# Normalize to 0-171 range (standard MI range)
+			maintainability_index = max(0, min(171, maintainability_index))
+			
+			return {
+				'mi': maintainability_index,
+				'mi_raw': raw_maintainability_index,
+				'mi_woc': mi_woc,
+				'mi_cw': mi_cw,
+				'interpretation': self._interpret_maintainability_index(raw_maintainability_index)
+			}
+			
+		except (ValueError, OverflowError, ZeroDivisionError) as e:
+			if conf['debug']:
+				print(f'Warning: Maintainability Index calculation failed: {e}')
+			return {
+				'mi': 0.0,
+				'mi_woc': 0.0,
+				'mi_cw': 0.0,
+				'interpretation': 'calculation_failed'
+			}
+
+	def _interpret_maintainability_index(self, mi):
+		"""Interpret Maintainability Index score."""
+		if mi >= 85:
+			return 'good'          # Good maintainability
+		elif mi >= 65:
+			return 'moderate'      # Moderate maintainability
+		elif mi >= 0:
+			return 'difficult'     # Difficult to maintain
+		else:
+			return 'critical'      # Critical/pathological case
+	
+	def _calculate_comprehensive_project_metrics(self):
+		"""Calculate comprehensive code quality metrics for the entire project."""
+		print('  Analyzing source files for comprehensive metrics...')
+		
+		# Get all source files
+		try:
+			files_output = getpipeoutput(['git ls-files'])
+			if not files_output.strip():
+				print('    No files found in repository')
+				return
+			
+			source_files = []
+			for filepath in files_output.strip().split('\n'):
+				if filepath.strip() and should_include_file(filepath.split('/')[-1]):
+					full_path = os.path.join(os.getcwd(), filepath)
+					if os.path.exists(full_path):
+						source_files.append(filepath)
+			
+			if not source_files:
+				print('    No source files found with allowed extensions')
+				return
+			
+			print(f'    Processing {len(source_files)} source files...')
+			
+			# Initialize aggregate metrics
+			project_totals = {
+				'files_analyzed': 0,
+				'total_loc_phy': 0,
+				'total_loc_bl': 0, 
+				'total_loc_pro': 0,
+				'total_loc_com': 0,
+				'total_halstead_volume': 0.0,
+				'total_halstead_difficulty': 0.0,
+				'total_halstead_effort': 0.0,
+				'total_estimated_bugs': 0.0,
+				'total_cyclomatic_complexity': 0,
+				'max_cyclomatic_complexity': 0,
+				'total_maintainability_index': 0.0,
+				'files_by_maintainability': {
+					'good': 0,
+					'moderate': 0,
+					'difficult': 0,
+					'critical': 0
+				}
+			}
+			
+			# Analyze each file
+			for i, filepath in enumerate(source_files):
+				if i % 50 == 0 and i > 0:
+					print(f'    Processed {i}/{len(source_files)} files...')
+				
+				try:
+					metrics = self.calculate_comprehensive_metrics(filepath)
+					if not metrics:
+						continue
+					
+					# Aggregate LOC metrics
+					loc = metrics['loc']
+					project_totals['total_loc_phy'] += loc['loc_phy']
+					project_totals['total_loc_bl'] += loc['loc_bl']
+					project_totals['total_loc_pro'] += loc['loc_pro']
+					project_totals['total_loc_com'] += loc['loc_com']
+					
+					# Aggregate Halstead metrics
+					halstead = metrics['halstead']
+					project_totals['total_halstead_volume'] += halstead['V']
+					project_totals['total_halstead_difficulty'] += halstead['D']
+					project_totals['total_halstead_effort'] += halstead['E']
+					project_totals['total_estimated_bugs'] += halstead['B']
+					
+					# Aggregate McCabe metrics
+					mccabe = metrics['mccabe']
+					complexity = mccabe['cyclomatic_complexity']
+					project_totals['total_cyclomatic_complexity'] += complexity
+					project_totals['max_cyclomatic_complexity'] = max(project_totals['max_cyclomatic_complexity'], complexity)
+					
+					# Aggregate Maintainability Index
+					mi = metrics['maintainability_index']
+					project_totals['total_maintainability_index'] += mi['mi']
+					project_totals['files_by_maintainability'][mi['interpretation']] += 1
+					
+					project_totals['files_analyzed'] += 1
+					
+				except Exception as e:
+					if conf['debug']:
+						print(f'    Warning: Failed to analyze {filepath}: {e}')
+					continue
+			
+			# Calculate averages and store results
+			if project_totals['files_analyzed'] > 0:
+				files_count = project_totals['files_analyzed']
+				
+				# Store comprehensive metrics in project health
+				if 'comprehensive_metrics' not in self.project_health:
+					self.project_health['comprehensive_metrics'] = {}
+				
+				cm = self.project_health['comprehensive_metrics']
+				
+				# LOC metrics with averages
+				cm['loc_metrics'] = {
+					'total_loc_phy': project_totals['total_loc_phy'],
+					'total_loc_bl': project_totals['total_loc_bl'],
+					'total_loc_pro': project_totals['total_loc_pro'],
+					'total_loc_com': project_totals['total_loc_com'],
+					'avg_loc_phy_per_file': project_totals['total_loc_phy'] / files_count,
+					'avg_comment_ratio': (project_totals['total_loc_com'] / max(project_totals['total_loc_phy'], 1)) * 100,
+					'files_analyzed': files_count
+				}
+				
+				# Halstead metrics with averages  
+				cm['halstead_metrics'] = {
+					'total_volume': project_totals['total_halstead_volume'],
+					'total_difficulty': project_totals['total_halstead_difficulty'], 
+					'total_effort': project_totals['total_halstead_effort'],
+					'total_estimated_bugs': project_totals['total_estimated_bugs'],
+					'avg_volume_per_file': project_totals['total_halstead_volume'] / files_count,
+					'avg_difficulty_per_file': project_totals['total_halstead_difficulty'] / files_count,
+					'avg_effort_per_file': project_totals['total_halstead_effort'] / files_count,
+					'files_analyzed': files_count
+				}
+				
+				# McCabe metrics with averages
+				cm['mccabe_metrics'] = {
+					'total_complexity': project_totals['total_cyclomatic_complexity'],
+					'max_complexity': project_totals['max_cyclomatic_complexity'],
+					'avg_complexity_per_file': project_totals['total_cyclomatic_complexity'] / files_count,
+					'files_analyzed': files_count
+				}
+				
+				# Maintainability Index metrics
+				cm['maintainability_metrics'] = {
+					'total_mi': project_totals['total_maintainability_index'],
+					'avg_mi': project_totals['total_maintainability_index'] / files_count,
+					'good_files': project_totals['files_by_maintainability']['good'],
+					'moderate_files': project_totals['files_by_maintainability']['moderate'],
+					'difficult_files': project_totals['files_by_maintainability']['difficult'],
+					'critical_files': project_totals['files_by_maintainability']['critical'],
+					'files_analyzed': files_count
+				}
+				
+				print(f'    Completed comprehensive analysis of {files_count} files')
+				print(f'    Average metrics: LOC={cm["loc_metrics"]["avg_loc_phy_per_file"]:.1f}, ' +
+					  f'Complexity={cm["mccabe_metrics"]["avg_complexity_per_file"]:.1f}, ' +
+					  f'MI={cm["maintainability_metrics"]["avg_mi"]:.1f}')
+			else:
+				print('    No files could be analyzed for comprehensive metrics')
+				
+		except Exception as e:
+			if conf['debug']:
+				print(f'    Error in comprehensive metrics calculation: {e}')
+			
+	def _calculate_project_health_metrics(self):
+		"""Calculate overall project health indicators."""
+		print('  Calculating project health indicators...')
+		
+		try:
+			# Get comprehensive metrics if available
+			cm = self.project_health.get('comprehensive_metrics', {})
+			
+			# Calculate Overall Health Score (weighted average)
+			health_components = []
+			
+			# 1. Documentation Quality (25% weight)
+			doc_score = self.calculate_documentation_quality()
+			health_components.append(('documentation', doc_score, 0.25))
+			
+			# 2. Code Quality based on Maintainability Index (30% weight)
+			if cm.get('maintainability_metrics', {}).get('avg_mi', 0) > 0:
+				mi_score = min(cm['maintainability_metrics']['avg_mi'], 100)
+				# Convert MI to 0-100 scale (MI >= 85 is good)
+				code_quality_score = (mi_score / 85) * 100 if mi_score <= 85 else 100
+			else:
+				code_quality_score = 50  # Default if no data
+			health_components.append(('code_quality', code_quality_score, 0.30))
+			
+			# 3. Team Collaboration (20% weight)
+			bus_factor = self.calculate_bus_factor()
+			collaboration_score = min(bus_factor * 20, 100)  # Scale bus factor
+			health_components.append(('collaboration', collaboration_score, 0.20))
+			
+			# 4. Complexity Management (15% weight)
+			if cm.get('mccabe_metrics', {}).get('avg_complexity_per_file', 0) > 0:
+				avg_complexity = cm['mccabe_metrics']['avg_complexity_per_file']
+				# Good: <= 10, Acceptable: <= 15, Poor: > 15
+				if avg_complexity <= 10:
+					complexity_score = 100
+				elif avg_complexity <= 15:
+					complexity_score = 80 - ((avg_complexity - 10) * 8)  # Linear decrease
+				else:
+					complexity_score = max(20, 80 - ((avg_complexity - 15) * 4))  # Cap at 20
+			else:
+				complexity_score = 70  # Default
+			health_components.append(('complexity', complexity_score, 0.15))
+			
+			# 5. Code Coverage (estimated from comments) (10% weight)
+			if cm.get('loc_metrics', {}).get('avg_comment_ratio', 0) > 0:
+				comment_ratio = cm['loc_metrics']['avg_comment_ratio']
+				# Good range: 20-40%
+				if 20 <= comment_ratio <= 40:
+					coverage_score = 100
+				elif comment_ratio < 20:
+					coverage_score = (comment_ratio / 20) * 100
+				else:  # > 40%
+					coverage_score = max(60, 100 - ((comment_ratio - 40) * 2))
+			else:
+				coverage_score = 30  # Default for no comments
+			health_components.append(('coverage', coverage_score, 0.10))
+			
+			# Calculate weighted overall health score
+			total_score = sum(score * weight for _, score, weight in health_components)
+			self.project_health['overall_health_score'] = min(100, max(0, total_score))
+			
+			# Set risk level
+			if total_score >= 80:
+				self.project_health['risk_level'] = 'low'
+			elif total_score >= 60:
+				self.project_health['risk_level'] = 'medium'
+			else:
+				self.project_health['risk_level'] = 'high'
+			
+			# Set quality gate status
+			if total_score >= 85 and doc_score >= 60 and collaboration_score >= 40:
+				self.project_health['quality_gate_status'] = 'passed'
+			elif total_score >= 70:
+				self.project_health['quality_gate_status'] = 'warning'
+			else:
+				self.project_health['quality_gate_status'] = 'failed'
+			
+			# Generate actionable issues
+			self.project_health['actionable_issues'] = []
+			
+			if doc_score < 50:
+				self.project_health['actionable_issues'].append('Improve code documentation - current comment density is low')
+			
+			if bus_factor <= 2:
+				self.project_health['actionable_issues'].append('Increase team collaboration - current bus factor too low')
+			
+			if cm.get('mccabe_metrics', {}).get('avg_complexity_per_file', 0) > 15:
+				self.project_health['actionable_issues'].append('Reduce code complexity - average cyclomatic complexity is too high')
+			
+			if cm.get('maintainability_metrics', {}).get('difficult_files', 0) + cm.get('maintainability_metrics', {}).get('critical_files', 0) > 0:
+				problem_files = cm['maintainability_metrics']['difficult_files'] + cm['maintainability_metrics']['critical_files']
+				self.project_health['actionable_issues'].append(f'Refactor {problem_files} files with poor maintainability index')
+			
+			print(f'    Overall Health Score: {self.project_health["overall_health_score"]:.1f}/100')
+			print(f'    Risk Level: {self.project_health["risk_level"]}')
+			print(f'    Quality Gate: {self.project_health["quality_gate_status"]}')
+			
+			if self.project_health['actionable_issues']:
+				print(f'    Identified {len(self.project_health["actionable_issues"])} actionable issues')
+			
+		except Exception as e:
+			if conf['debug']:
+				print(f'    Error calculating project health metrics: {e}')
+			# Set default values
+			self.project_health['overall_health_score'] = 0.0
+			self.project_health['risk_level'] = 'unknown'
+			self.project_health['quality_gate_status'] = 'unknown'
+			self.project_health['actionable_issues'] = []
+
 class GitDataCollector(DataCollector):
 	def collect(self, dir):
 		DataCollector.collect(self, dir)
@@ -2857,6 +3606,14 @@ class GitDataCollector(DataCollector):
 				print(f'Warning: Team performance calculation failed: {e}')
 	
 	def refine(self):
+		# Calculate comprehensive metrics for all files
+		print('Calculating comprehensive code metrics...')
+		self._calculate_comprehensive_project_metrics()
+		
+		# Calculate project health metrics
+		print('Calculating project health metrics...')
+		self._calculate_project_health_metrics()
+		
 		# authors
 		# name -> {place_by_commits, commits_frac, date_first, date_last, timedelta}
 		self.authors_by_commits = getkeyssortedbyvaluekey(self.authors, 'commits')
@@ -3402,6 +4159,119 @@ class HTMLReportCreator(ReportCreator):
 		code_quality_score = data.calculate_code_quality_score()
 		f.write('<dt>Code Quality Score</dt><dd><strong>%.1f/100</strong></dd>' % code_quality_score)
 		f.write('</dl>')
+		
+		# Comprehensive Code Metrics Section
+		cm = data.project_health.get('comprehensive_metrics', {})
+		if cm:
+			f.write('<h3>Comprehensive Code Metrics (College Project Standard)</h3>')
+			
+			# LOC Metrics
+			loc_metrics = cm.get('loc_metrics', {})
+			if loc_metrics:
+				f.write('<h4>Lines-of-Code Metrics</h4>')
+				f.write('<dl>')
+				f.write('<dt>LOCphy (Physical Lines)</dt><dd>%d</dd>' % loc_metrics.get('total_loc_phy', 0))
+				f.write('<dt>LOCbl (Blank Lines)</dt><dd>%d</dd>' % loc_metrics.get('total_loc_bl', 0))
+				f.write('<dt>LOCpro (Program Lines)</dt><dd>%d</dd>' % loc_metrics.get('total_loc_pro', 0))
+				f.write('<dt>LOCcom (Comment Lines)</dt><dd>%d</dd>' % loc_metrics.get('total_loc_com', 0))
+				f.write('<dt>Average LOC per File</dt><dd>%.1f</dd>' % loc_metrics.get('avg_loc_phy_per_file', 0))
+				f.write('<dt>Comment Density</dt><dd>%.1f%%</dd>' % loc_metrics.get('avg_comment_ratio', 0))
+				
+				# Recommendation check
+				comment_ratio = loc_metrics.get('avg_comment_ratio', 0)
+				if 30 <= comment_ratio <= 75:
+					rec_color = 'green'
+					rec_text = 'GOOD'
+				elif 20 <= comment_ratio < 30 or 75 < comment_ratio <= 90:
+					rec_color = 'orange' 
+					rec_text = 'ACCEPTABLE'
+				else:
+					rec_color = 'red'
+					rec_text = 'NEEDS IMPROVEMENT'
+				f.write('<dt>Recommendation</dt><dd><span style="color: %s; font-weight: bold;">%s</span> (Optimal: 30-75%%)</dd>' % (rec_color, rec_text))
+				f.write('</dl>')
+			
+			# Halstead Metrics
+			halstead_metrics = cm.get('halstead_metrics', {})
+			if halstead_metrics:
+				f.write('<h4>Halstead Complexity Metrics</h4>')
+				f.write('<dl>')
+				f.write('<dt>Total Program Volume (V)</dt><dd>%.1f</dd>' % halstead_metrics.get('total_volume', 0))
+				f.write('<dt>Average Volume per File</dt><dd>%.1f</dd>' % halstead_metrics.get('avg_volume_per_file', 0))
+				f.write('<dt>Total Difficulty (D)</dt><dd>%.1f</dd>' % halstead_metrics.get('total_difficulty', 0))
+				f.write('<dt>Average Difficulty per File</dt><dd>%.1f</dd>' % halstead_metrics.get('avg_difficulty_per_file', 0))
+				f.write('<dt>Total Effort (E)</dt><dd>%.1f</dd>' % halstead_metrics.get('total_effort', 0))
+				f.write('<dt>Average Effort per File</dt><dd>%.1f</dd>' % halstead_metrics.get('avg_effort_per_file', 0))
+				f.write('<dt>Estimated Bugs</dt><dd>%.2f</dd>' % halstead_metrics.get('total_estimated_bugs', 0))
+				
+				# Recommendation check
+				avg_volume = halstead_metrics.get('avg_volume_per_file', 0)
+				if 20 <= avg_volume <= 1000:
+					rec_color = 'green'
+					rec_text = 'GOOD'
+				elif 1000 < avg_volume <= 1500:
+					rec_color = 'orange'
+					rec_text = 'ACCEPTABLE'
+				else:
+					rec_color = 'red'
+					rec_text = 'NEEDS IMPROVEMENT'
+				f.write('<dt>Recommendation</dt><dd><span style="color: %s; font-weight: bold;">%s</span> (Optimal: 20-1000 per function, 100-8000 per file)</dd>' % (rec_color, rec_text))
+				f.write('</dl>')
+			
+			# McCabe Cyclomatic Complexity
+			mccabe_metrics = cm.get('mccabe_metrics', {})
+			if mccabe_metrics:
+				f.write('<h4>McCabe Cyclomatic Complexity</h4>')
+				f.write('<dl>')
+				f.write('<dt>Total Complexity (v(G))</dt><dd>%d</dd>' % mccabe_metrics.get('total_complexity', 0))
+				f.write('<dt>Maximum Complexity</dt><dd>%d</dd>' % mccabe_metrics.get('max_complexity', 0))
+				f.write('<dt>Average Complexity per File</dt><dd>%.1f</dd>' % mccabe_metrics.get('avg_complexity_per_file', 0))
+				
+				# Recommendation check
+				avg_complexity = mccabe_metrics.get('avg_complexity_per_file', 0)
+				max_complexity = mccabe_metrics.get('max_complexity', 0)
+				if avg_complexity <= 15 and max_complexity <= 20:
+					rec_color = 'green'
+					rec_text = 'GOOD'
+				elif avg_complexity <= 20 or max_complexity <= 30:
+					rec_color = 'orange'
+					rec_text = 'ACCEPTABLE'
+				else:
+					rec_color = 'red'
+					rec_text = 'NEEDS IMPROVEMENT'
+				f.write('<dt>Recommendation</dt><dd><span style="color: %s; font-weight: bold;">%s</span> (Optimal: ≤15 per function, ≤100 per file)</dd>' % (rec_color, rec_text))
+				f.write('</dl>')
+			
+			# Maintainability Index
+			mi_metrics = cm.get('maintainability_metrics', {})
+			if mi_metrics:
+				f.write('<h4>Maintainability Index (MI)</h4>')
+				f.write('<dl>')
+				f.write('<dt>Average MI</dt><dd>%.1f</dd>' % mi_metrics.get('avg_mi', 0))
+				f.write('<dt>Good Files (MI ≥ 85)</dt><dd>%d</dd>' % mi_metrics.get('good_files', 0))
+				f.write('<dt>Moderate Files (65 ≤ MI < 85)</dt><dd>%d</dd>' % mi_metrics.get('moderate_files', 0))
+				f.write('<dt>Difficult Files (0 ≤ MI < 65)</dt><dd>%d</dd>' % mi_metrics.get('difficult_files', 0))
+				f.write('<dt>Critical Files (MI < 0)</dt><dd>%d</dd>' % mi_metrics.get('critical_files', 0))
+				
+				# Recommendation check
+				avg_mi = mi_metrics.get('avg_mi', 0)
+				if avg_mi >= 85:
+					rec_color = 'green'
+					rec_text = 'GOOD'
+				elif avg_mi >= 65:
+					rec_color = 'orange'
+					rec_text = 'MODERATE'
+				else:
+					rec_color = 'red'
+					rec_text = 'DIFFICULT TO MAINTAIN'
+				f.write('<dt>Overall Assessment</dt><dd><span style="color: %s; font-weight: bold;">%s</span></dd>' % (rec_color, rec_text))
+				
+				# Files that need attention
+				problem_files = mi_metrics.get('difficult_files', 0) + mi_metrics.get('critical_files', 0)
+				if problem_files > 0:
+					f.write('<dt>Files Needing Attention</dt><dd><span style="color: red; font-weight: bold;">%d</span> files require refactoring</dd>' % problem_files)
+				
+				f.write('</dl>')
 		
 		# Team Collaboration Metrics  
 		f.write('<h3>Team Collaboration</h3>')
