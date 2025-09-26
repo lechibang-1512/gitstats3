@@ -5746,8 +5746,8 @@ class GitStats:
 				print(f'Warning: Could not generate summary report: {e}')
 	
 	def run_single_mode(self, args):
-		"""Original single/multiple repository mode."""
-		outputpath = os.path.abspath(args[-1])
+		"""Original single/multiple repository mode with subfolder creation."""
+		base_outputpath = os.path.abspath(args[-1])
 		rundir = os.getcwd()
 
 		# Validate git paths
@@ -5764,23 +5764,23 @@ class GitStats:
 				print(f'FATAL: Path is not a git repository (no .git directory found): {gitpath}')
 				sys.exit(1)
 
-		# Validate and create output directory
+		# Validate and create base output directory
 		try:
-			os.makedirs(outputpath, exist_ok=True)
+			os.makedirs(base_outputpath, exist_ok=True)
 		except PermissionError:
-			print(f'FATAL: Permission denied creating output directory: {outputpath}')
+			print(f'FATAL: Permission denied creating output directory: {base_outputpath}')
 			sys.exit(1)
 		except OSError as e:
-			print(f'FATAL: Error creating output directory {outputpath}: {e}')
+			print(f'FATAL: Error creating output directory {base_outputpath}: {e}')
 			sys.exit(1)
 		
-		if not os.path.isdir(outputpath):
+		if not os.path.isdir(base_outputpath):
 			print('FATAL: Output path is not a directory or does not exist')
 			sys.exit(1)
 		
 		# Check write permissions
-		if not os.access(outputpath, os.W_OK):
-			print(f'FATAL: No write permission for output directory: {outputpath}')
+		if not os.access(base_outputpath, os.W_OK):
+			print(f'FATAL: No write permission for output directory: {base_outputpath}')
 			sys.exit(1)
 
 		if not getmatplotlibversion():
@@ -5793,14 +5793,39 @@ class GitStats:
 				print(f'  {key}: {value}')
 			print()
 
-		print('Output path: %s' % outputpath)
-		cachefile = os.path.join(outputpath, 'gitstats.cache')
-
-		data = GitDataCollector()
-		data.loadCache(cachefile)
-
+		# Initialize variables for Pylance static analysis
+		outputpath = None
+		
+		# Process each repository and create subfolders
 		for gitpath in git_paths:
+			# Get repository name from the path
+			repo_name = os.path.basename(os.path.abspath(gitpath))
+			safe_repo_name = self._sanitize_filename(repo_name)
+			
+			# Create repository-specific output directory
+			outputpath = os.path.join(base_outputpath, f'{safe_repo_name}_report')
+			
+			# Validate and create specific output directory
+			try:
+				os.makedirs(outputpath, exist_ok=True)
+			except PermissionError:
+				print(f'FATAL: Permission denied creating repository output directory: {outputpath}')
+				sys.exit(1)
+			except OSError as e:
+				print(f'FATAL: Error creating repository output directory {outputpath}: {e}')
+				sys.exit(1)
+			
+			if not os.access(outputpath, os.W_OK):
+				print(f'FATAL: No write permission for repository output directory: {outputpath}')
+				sys.exit(1)
+
 			print('Git path: %s' % gitpath)
+			print('Output path: %s' % outputpath)
+			
+			cachefile = os.path.join(outputpath, 'gitstats.cache')
+
+			data = GitDataCollector()
+			data.loadCache(cachefile)
 
 			prevdir = os.getcwd()
 			os.chdir(gitpath)
@@ -5810,29 +5835,49 @@ class GitStats:
 
 			os.chdir(prevdir)
 
-		print('Refining data...')
-		data.saveCache(cachefile)
-		data.refine()
+			print('Refining data...')
+			data.saveCache(cachefile)
+			data.refine()
 
-		os.chdir(rundir)
+			os.chdir(rundir)
 
-		print('Generating report...')
-		
-		print('Creating HTML report...')
-		html_report = HTMLReportCreator()
-		html_report.create(data, outputpath)
-		
+			print('Generating report...')
+			
+			print('Creating HTML report...')
+			html_report = HTMLReportCreator()
+			html_report.create(data, outputpath)
+			
+			print(f'✓ Successfully generated report for {repo_name}')
 
 		time_end = time.time()
 		exectime_internal = time_end - time_start
 		external_percentage = (100.0 * exectime_external) / exectime_internal if exectime_internal > 0 else 0.0
 		print('Execution time %.5f secs, %.5f secs (%.2f %%) in external commands)' % (exectime_internal, exectime_external, external_percentage))
 		
-		if sys.stdin.isatty():
-			print('You may now run:')
-			print()
-			print('   sensible-browser \'%s\'' % os.path.join(outputpath, 'index.html').replace("'", "'\\''"))
-			print()
+		if len(git_paths) == 1:
+			# For single repository, show the direct path to the report
+			repo_name = os.path.basename(os.path.abspath(git_paths[0]))
+			safe_repo_name = self._sanitize_filename(repo_name)
+			outputpath = os.path.join(base_outputpath, f'{safe_repo_name}_report')
+			
+			if sys.stdin.isatty():
+				print('You may now run:')
+				print()
+				print('   sensible-browser \'%s\'' % os.path.join(outputpath, 'index.html').replace("'", "'\\''"))
+				print()
+		else:
+			# For multiple repositories, show the base path
+			if sys.stdin.isatty():
+				print('Reports have been generated in subfolders under:')
+				print(f'  {base_outputpath}')
+				print()
+				print('You may run:')
+				for gitpath in git_paths:
+					repo_name = os.path.basename(os.path.abspath(gitpath))
+					safe_repo_name = self._sanitize_filename(repo_name)
+					repo_outputpath = os.path.join(base_outputpath, f'{safe_repo_name}_report')
+					print('   sensible-browser \'%s\'' % os.path.join(repo_outputpath, 'index.html').replace("'", "'\\''"))
+				print()
 	
 	def _process_repositories_parallel(self, repositories, base_outputpath, rundir):
 		"""Process repositories in parallel for improved performance."""
