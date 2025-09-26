@@ -16,6 +16,10 @@ matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+import threading
+
+# Thread-local matplotlib configuration to avoid thread safety issues
+matplotlib_lock = threading.Lock()
 
 if sys.version_info < (3, 6):
 	print("Python 3.6 or higher is required for gitstats", file=sys.stderr)
@@ -47,24 +51,34 @@ class MatplotlibChartGenerator:
 		self.figsize = MATPLOTLIB_FIGSIZE
 		
 	def _setup_figure(self, title=""):
-		"""Create and configure a new figure."""
+		"""Create and configure a new figure with proper cleanup."""
+		# Force garbage collection before creating new figure
+		import gc
+		gc.collect()
+		
 		plt.style.use('default')
 		fig, ax = plt.subplots(figsize=self.figsize, dpi=self.dpi)
 		ax.grid(True, alpha=0.3)
 		return fig, ax
 	
 	def _save_figure(self, fig, output_path):
-		"""Save the figure to a file with improved layout handling."""
-		# Apply tight layout with padding for better text visibility
-		fig.tight_layout(pad=2.0)
-		
-		# Additional bottom margin for rotated x-axis labels
-		fig.subplots_adjust(bottom=0.15)
-		
-		fig.savefig(output_path, dpi=self.dpi, bbox_inches='tight', 
-					facecolor='white', edgecolor='none', transparent=True,
-					pad_inches=0.2)  # Add padding around the plot
-		plt.close(fig)
+		"""Save the figure to a file with improved layout handling and thread safety."""
+		try:
+			with matplotlib_lock:  # Thread-safe matplotlib operations
+				# Apply tight layout with padding for better text visibility
+				fig.tight_layout(pad=2.0)
+				
+				# Additional bottom margin for rotated x-axis labels
+				fig.subplots_adjust(bottom=0.15)
+				
+				fig.savefig(output_path, dpi=self.dpi, bbox_inches='tight', 
+							facecolor='white', edgecolor='none', transparent=True,
+							pad_inches=0.2)  # Add padding around the plot
+		finally:
+			# Always close the figure to prevent memory leaks
+			plt.close(fig)
+			plt.clf()  # Clear the current figure
+			plt.cla()  # Clear the current axis
 	
 	def create_hour_of_day_chart(self, data_file, output_path):
 		"""Create hour of day activity chart."""
@@ -619,18 +633,17 @@ conf = {
 	'commit_end': 'HEAD',
 	'linear_linestats': 1,
 	'project_name': '',
-	'processes': min(8, os.cpu_count() or 4),  # Auto-detect optimal process count
+	'processes': min(4, os.cpu_count() or 2),  # Reduced for stability
 	'start_date': '',
 	'debug': False,
 	'verbose': False,
 	'scan_default_branch_only': True,  # Only scan commits from the default branch
 	# Multi-repo specific configuration
 	'multi_repo_max_depth': 10,
-	'multi_repo_max_depth': 10,
 	'multi_repo_include_patterns': None,
 	'multi_repo_exclude_patterns': None,
-	'multi_repo_parallel': True,
-	'multi_repo_max_workers': 4,
+	'multi_repo_parallel': False,  # Disabled by default for stability
+	'multi_repo_max_workers': 2,  # Reduced for stability
 	'multi_repo_timeout': 3600,  # 1 hour timeout per repository
 	'multi_repo_cleanup_on_error': True,
 	'multi_repo_fast_scan': True,  # Enable fast concurrent repository discovery
@@ -4532,61 +4545,83 @@ class HTMLReportCreator(ReportCreator):
 		os.chdir(path)
 		
 		try:
+			# Thread-safe matplotlib operations for parallel processing
 			# Generate all the chart types if their data files exist
+			
+			# Helper function to safely create charts with timeout
+			def safe_create_chart(chart_func, *args):
+				try:
+					with matplotlib_lock:
+						chart_func(*args)
+				except Exception as e:
+					print(f"Warning: Failed to create chart {chart_func.__name__}: {e}")
+					if conf.get('debug', False):
+						import traceback
+						traceback.print_exc()
 			
 			# hour of day
 			if os.path.exists('hour_of_day.dat'):
-				chart_generator.create_hour_of_day_chart('hour_of_day.dat', 'hour_of_day.png')
+				safe_create_chart(chart_generator.create_hour_of_day_chart, 'hour_of_day.dat', 'hour_of_day.png')
 			
 			# day of week
 			if os.path.exists('day_of_week.dat'):
-				chart_generator.create_day_of_week_chart('day_of_week.dat', 'day_of_week.png')
+				safe_create_chart(chart_generator.create_day_of_week_chart, 'day_of_week.dat', 'day_of_week.png')
 			
 			# domains
 			if os.path.exists('domains.dat'):
-				chart_generator.create_domains_chart('domains.dat', 'domains.png')
+				safe_create_chart(chart_generator.create_domains_chart, 'domains.dat', 'domains.png')
 			
 			# month of year
 			if os.path.exists('month_of_year.dat'):
-				chart_generator.create_month_of_year_chart('month_of_year.dat', 'month_of_year.png')
+				safe_create_chart(chart_generator.create_month_of_year_chart, 'month_of_year.dat', 'month_of_year.png')
 			
 			# commits by year-month
 			if os.path.exists('commits_by_year_month.dat'):
-				chart_generator.create_commits_by_year_month_chart('commits_by_year_month.dat', 'commits_by_year_month.png')
+				safe_create_chart(chart_generator.create_commits_by_year_month_chart, 'commits_by_year_month.dat', 'commits_by_year_month.png')
 			
 			# commits by year
 			if os.path.exists('commits_by_year.dat'):
-				chart_generator.create_commits_by_year_chart('commits_by_year.dat', 'commits_by_year.png')
+				safe_create_chart(chart_generator.create_commits_by_year_chart, 'commits_by_year.dat', 'commits_by_year.png')
 			
 			# files by date
 			if os.path.exists('files_by_date.dat'):
-				chart_generator.create_files_by_date_chart('files_by_date.dat', 'files_by_date.png')
+				safe_create_chart(chart_generator.create_files_by_date_chart, 'files_by_date.dat', 'files_by_date.png')
 			
 			# files by year
 			if os.path.exists('files_by_year.dat'):
-				chart_generator.create_files_by_year_chart('files_by_year.dat', 'files_by_year.png')
+				safe_create_chart(chart_generator.create_files_by_year_chart, 'files_by_year.dat', 'files_by_year.png')
 			
 			# lines of code
 			if os.path.exists('lines_of_code.dat'):
-				chart_generator.create_lines_of_code_chart('lines_of_code.dat', 'lines_of_code.png')
+				safe_create_chart(chart_generator.create_lines_of_code_chart, 'lines_of_code.dat', 'lines_of_code.png')
 			
 			# lines of code by author
 			if os.path.exists('lines_of_code_by_author.dat') and hasattr(self, 'authors_to_plot'):
-				chart_generator.create_lines_of_code_by_author_chart('lines_of_code_by_author.dat', 'lines_of_code_by_author.png', self.authors_to_plot)
+				safe_create_chart(chart_generator.create_lines_of_code_by_author_chart, 'lines_of_code_by_author.dat', 'lines_of_code_by_author.png', self.authors_to_plot)
 			
 			# commits by author
 			if os.path.exists('commits_by_author.dat') and hasattr(self, 'authors_to_plot'):
-				chart_generator.create_commits_by_author_chart('commits_by_author.dat', 'commits_by_author.png', self.authors_to_plot)
+				safe_create_chart(chart_generator.create_commits_by_author_chart, 'commits_by_author.dat', 'commits_by_author.png', self.authors_to_plot)
 			
 			# pace of changes
 			if os.path.exists('pace_of_changes.dat'):
-				chart_generator.create_pace_of_changes_chart('pace_of_changes.dat', 'pace_of_changes.png')
+				safe_create_chart(chart_generator.create_pace_of_changes_chart, 'pace_of_changes.dat', 'pace_of_changes.png')
 				
 		except Exception as e:
 			print(f"Warning: Error generating charts: {e}")
+			if conf.get('debug', False):
+				import traceback
+				traceback.print_exc()
 		finally:
-			# Always restore the original directory
+			# Always restore the original directory and clean up matplotlib
 			os.chdir(old_dir)
+			# Force cleanup of matplotlib resources
+			try:
+				plt.close('all')
+				import gc
+				gc.collect()
+			except:
+				pass
 
 	def printHeader(self, f, title = ''):
 		f.write(
