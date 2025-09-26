@@ -37,8 +37,36 @@ table.noborders td {
 }
 
 .vtable {
-	float: right;
+	margin: 20px auto;
+	text-align: center;
 	clear: both;
+}
+
+.vtable table {
+	margin: 0 auto;
+	border-collapse: collapse;
+	width: auto;
+	min-width: 400px;
+	box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.vtable th, .vtable td {
+	padding: 8px 16px;
+	text-align: left;
+	border: 1px solid #ddd;
+}
+
+.vtable th {
+	background-color: #f5f5f5;
+	font-weight: bold;
+}
+
+.vtable tr:nth-child(even) {
+	background-color: #f9f9f9;
+}
+
+.vtable tr:hover {
+	background-color: #f0f0f0;
 }
 
 table.tags td {
@@ -287,3 +315,44 @@ tr.concern {
 tr.concern:hover {
 	background-color: #ffcccc !important;
 }
+
+/* Day of Week table styling */
+.day-of-week {
+	margin: 1em 0;
+	width: 100%;
+	max-width: 600px;
+}
+
+.day-of-week th {
+	background-color: #456789;
+	color: white;
+	text-align: center;
+	padding: 0.5em;
+	font-weight: bold;
+}
+
+.day-of-week td {
+	text-align: center;
+	padding: 0.4em;
+	vertical-align: middle;
+}
+
+.day-of-week td:first-child {
+	text-align: left;
+	font-weight: bold;
+	background-color: #f0f0f0;
+}
+
+.day-of-week tr:nth-child(even) {
+	background-color: #f9f9f9;
+}
+
+.day-of-week tr:nth-child(odd) {
+	background-color: #ffffff;
+}
+
+.day-of-week tr:hover {
+	background-color: #e6f3ff !important;
+}
+
+/* Keep vtable styling for other sections, just improved styling */

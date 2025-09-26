@@ -197,6 +197,89 @@ class TableDataGenerator:
 					formatted.append([row[0], int(row[1])])
 		return formatted[-50:]  # Show last 50 entries
 
+	def _format_lines_of_code_by_author_data(self, data, authors_to_plot):
+		"""Format lines of code by author data for table display."""
+		formatted = []
+		for row in data:
+			if len(row) >= 2:
+				author = row[0]
+				if author in authors_to_plot:
+					lines = int(row[1])
+					formatted.append([author, lines])
+		return formatted
+	
+	def _format_commits_by_author_data(self, data, authors_to_plot):
+		"""Format commits by author data for table display."""
+		formatted = []
+		for row in data:
+			if len(row) >= 2:
+				author = row[0]
+				if author in authors_to_plot:
+					commits = int(row[1])
+					formatted.append([author, commits])
+		return formatted
+
+	# Public methods that wrap the private formatting methods
+	def format_hour_of_day_data(self, data_file):
+		"""Public method to format hour of day data."""
+		data = self.read_data_file(data_file)
+		return self._format_hour_of_day_data(data)
+	
+	def format_day_of_week_data(self, data_file):
+		"""Public method to format day of week data."""
+		data = self.read_data_file(data_file)
+		return self._format_day_of_week_data(data)
+	
+	def format_domains_data(self, data_file):
+		"""Public method to format domains data."""
+		data = self.read_data_file(data_file)
+		return self._format_domains_data(data)
+	
+	def format_month_of_year_data(self, data_file):
+		"""Public method to format month of year data."""
+		data = self.read_data_file(data_file)
+		return self._format_month_of_year_data(data)
+	
+	def format_commits_by_year_month_data(self, data_file):
+		"""Public method to format commits by year month data."""
+		data = self.read_data_file(data_file)
+		return self._format_commits_by_year_month_data(data)
+	
+	def format_commits_by_year_data(self, data_file):
+		"""Public method to format commits by year data."""
+		data = self.read_data_file(data_file)
+		return self._format_commits_by_year_data(data)
+	
+	def format_files_by_date_data(self, data_file):
+		"""Public method to format files by date data."""
+		data = self.read_data_file(data_file)
+		return self._format_files_by_date_data(data)
+	
+	def format_files_by_year_data(self, data_file):
+		"""Public method to format files by year data."""
+		data = self.read_data_file(data_file)
+		return self._format_files_by_year_data(data)
+	
+	def format_lines_of_code_data(self, data_file):
+		"""Public method to format lines of code data."""
+		data = self.read_data_file(data_file)
+		return self._format_lines_of_code_data(data)
+	
+	def format_pace_of_changes_data(self, data_file):
+		"""Public method to format pace of changes data."""
+		data = self.read_data_file(data_file)
+		return self._format_pace_of_changes_data(data)
+	
+	def format_lines_of_code_by_author_data(self, data_file, authors_to_plot):
+		"""Public method to format lines of code by author data."""
+		data = self.read_data_file(data_file)
+		return self._format_lines_of_code_by_author_data(data, authors_to_plot)
+	
+	def format_commits_by_author_data(self, data_file, authors_to_plot):
+		"""Public method to format commits by author data."""
+		data = self.read_data_file(data_file)
+		return self._format_commits_by_author_data(data, authors_to_plot)
+
 # Data is now displayed in tables instead of charts for better accessibility
 
 conf = {
@@ -263,6 +346,38 @@ def getpipeoutput(cmds, quiet = False):
 		if ON_LINUX and os.isatty(1):
 			print('\r', end='')
 		print('[%.5f] >> %s' % (end - start, ' | '.join(cmds)))
+	if conf['debug']:
+		print(f'DEBUG: Command output ({len(output)} bytes): {output[:200].decode("utf-8", errors="replace")}...')
+	exectime_external += (end - start)
+	return output.decode('utf-8', errors='replace').rstrip('\n')
+
+def getpipeoutput_list(cmd_list, quiet = False):
+	"""Execute command list without shell interpretation for safer path handling"""
+	global exectime_external
+	start = time.time()
+	
+	if (not quiet and ON_LINUX and os.isatty(1)) or conf['verbose']:
+		print('>> ' + ' '.join(cmd_list), end='')
+		sys.stdout.flush()
+	
+	try:
+		p = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		output, error = p.communicate()
+		if p.returncode != 0:
+			if not quiet:
+				print(f'\nCommand failed: {" ".join(cmd_list)}')
+				print(f'Error: {error.decode("utf-8", errors="replace")}')
+			return ''
+	except Exception as e:
+		if not quiet:
+			print(f'\nCommand execution failed: {e}')
+		return ''
+	
+	end = time.time()
+	if not quiet or conf['verbose'] or conf['debug']:
+		if ON_LINUX and os.isatty(1):
+			print('\r', end='')
+		print('[%.5f] >> %s' % (end - start, ' '.join(cmd_list)))
 	if conf['debug']:
 		print(f'DEBUG: Command output ({len(output)} bytes): {output[:200].decode("utf-8", errors="replace")}...')
 	exectime_external += (end - start)
@@ -357,9 +472,13 @@ VERSION = 0
 def getversion():
 	global VERSION
 	if VERSION == 0:
-		gitstats_repo = os.path.dirname(os.path.abspath(__file__))
-		VERSION = getpipeoutput(["git --git-dir=%s/.git --work-tree=%s rev-parse --short %s" %
-			(gitstats_repo, gitstats_repo, getcommitrange('HEAD').split('\n')[0])])
+		try:
+			gitstats_repo = os.path.dirname(os.path.abspath(__file__))
+			cmd = ['git', '--git-dir=%s/.git' % gitstats_repo, '--work-tree=%s' % gitstats_repo, 
+				   'rev-parse', '--short', getcommitrange('HEAD').split('\n')[0]]
+			VERSION = getpipeoutput_list(cmd)
+		except:
+			VERSION = 'unknown'
 	return VERSION
 
 def getgitversion():
@@ -1045,9 +1164,17 @@ class DataCollector:
 	def branches(self):
 		return self.branch_analysis['branches']
 		
+	@branches.setter
+	def branches(self, value):
+		self.branch_analysis['branches'] = value
+		
 	@property
 	def unmerged_branches(self):
 		return self.branch_analysis['unmerged_branches']
+		
+	@unmerged_branches.setter
+	def unmerged_branches(self, value):
+		self.branch_analysis['unmerged_branches'] = value
 		
 	@property
 	def main_branch(self):
@@ -2613,19 +2740,19 @@ class GitDataCollector(DataCollector):
 						critical_files_touched.append(filename)
 						total_impact_score += self.file_impact_scores.get(filename, 0)
 				
-				# Calculate bug potential based on commit messages and patterns
+				# Calculate maintenance work ratio (neutral term for bug fixes)
 				author_commits = self.team_analysis['commit_patterns'].get(author, {})
-				bug_commits = author_commits.get('bug_related_commits', 0)
+				maintenance_commits = author_commits.get('bug_related_commits', 0)
 				total_commits = author_commits.get('total_commits', 1)
-				bug_ratio = bug_commits / total_commits if total_commits > 0 else 0
+				maintenance_ratio = maintenance_commits / total_commits if total_commits > 0 else 0
 				
-				# Higher bug potential if author has many bug-fix commits
-				bug_potential = min(bug_ratio * 100, 100)
+				# Maintenance work percentage (neutral metric, not "bug potential")
+				maintenance_percentage = min(maintenance_ratio * 100, 100)
 				
 				self.impact_analysis[author] = {
 					'critical_files': critical_files_touched,
 					'impact_score': total_impact_score,
-					'bug_potential': bug_potential,
+					'maintenance_percentage': maintenance_percentage,
 					'high_impact_files': [f for f in file_authors if author in file_authors[f] and self.file_impact_scores.get(f, 0) > 50]
 				}
 				
@@ -2648,33 +2775,34 @@ class GitDataCollector(DataCollector):
 				working_patterns = self.team_analysis['working_patterns'].get(author, {})
 				impact_info = self.impact_analysis.get(author, {})
 				
-				# Efficiency Score (based on lines changed per commit and commit quality)
+				# Activity Score (based on commit patterns and code modification metrics)
 				avg_commit_size = commit_patterns.get('avg_commit_size', 0)
 				total_author_commits = author_info.get('commits', 0)
 				
-				# Normalize efficiency (sweet spot is around 20-50 lines per commit)
+				# Commit size distribution scoring (no penalties, just measurement)
 				if 20 <= avg_commit_size <= 50:
-					size_efficiency = 100
+					size_score = 100  # Moderate-sized commits
 				elif avg_commit_size < 20:
-					size_efficiency = max(0, avg_commit_size * 5)  # Penalty for too small commits
+					size_score = max(0, avg_commit_size * 5)  # Small incremental commits
 				else:
-					size_efficiency = max(0, 100 - (avg_commit_size - 50) * 2)  # Penalty for too large commits
+					size_score = max(0, 100 - (avg_commit_size - 50) * 2)  # Larger commits
 				
-				# Quality indicators
-				bug_commits = commit_patterns.get('bug_related_commits', 0)
+				# Work type distribution (all types valued equally)
+				maintenance_commits = commit_patterns.get('bug_related_commits', 0)
 				feature_commits = commit_patterns.get('feature_related_commits', 0)
 				refactor_commits = commit_patterns.get('refactor_related_commits', 0)
 				
-				quality_score = 0
+				work_diversity_score = 0
 				if total_author_commits > 0:
 					feature_ratio = feature_commits / total_author_commits
 					refactor_ratio = refactor_commits / total_author_commits
-					bug_ratio = bug_commits / total_author_commits
+					maintenance_ratio = maintenance_commits / total_author_commits
 					
-					quality_score = (feature_ratio * 40 + refactor_ratio * 30 - bug_ratio * 20) * 100
-					quality_score = max(0, min(100, quality_score))
+					# All work types contribute positively (no penalties for maintenance)
+					work_diversity_score = (feature_ratio * 35 + refactor_ratio * 35 + maintenance_ratio * 30) * 100
+					work_diversity_score = max(0, min(100, work_diversity_score))
 				
-				efficiency_score = (size_efficiency * 0.6 + quality_score * 0.4)
+				activity_score = (size_score * 0.6 + work_diversity_score * 0.4)
 				
 				# Consistency Score (based on commit frequency and working patterns)
 				commit_frequency = commit_patterns.get('commit_frequency', 0)
@@ -2689,20 +2817,20 @@ class GitDataCollector(DataCollector):
 				
 				consistency_score = (frequency_score * 0.4 + streak_score * 0.3 + gap_score * 0.3)
 				
-				# Leadership Score (based on impact on critical files, collaboration, and mentoring indicators)
+				# Collaboration Score (based on code interaction patterns and shared file work)
 				impact_score = impact_info.get('impact_score', 0)
 				critical_files_count = len(impact_info.get('critical_files', []))
 				
-				# Collaboration score based on working with others
+				# Multi-author file collaboration based on working with others
 				collaboration_data = self.author_collaboration.get(author, {})
 				worked_with_count = len(collaboration_data.get('worked_with', {}))
 				
-				# Normalize impact and collaboration
-				impact_leadership = min(impact_score / 10, 100)  # Scale impact score
-				collaboration_leadership = min(worked_with_count * 10, 100)  # Max score at 10 collaborators
-				critical_file_leadership = min(critical_files_count * 20, 100)  # Max score at 5 critical files
+				# Normalize collaboration metrics (objective measurement)
+				impact_component = min(impact_score / 10, 100)  # Scale impact score
+				multi_author_component = min(worked_with_count * 10, 100)  # Max score at 10 collaborators
+				shared_files_component = min(critical_files_count * 20, 100)  # Max score at 5 critical files
 				
-				leadership_score = (impact_leadership * 0.4 + collaboration_leadership * 0.3 + critical_file_leadership * 0.3)
+				collaboration_score = (impact_component * 0.4 + multi_author_component * 0.3 + shared_files_component * 0.3)
 				
 				# Overall contribution percentage
 				author_commits = author_info.get('commits', 0)
@@ -2710,16 +2838,16 @@ class GitDataCollector(DataCollector):
 				
 				# Store performance metrics
 				self.team_performance[author] = {
-					'efficiency_score': efficiency_score,
+					'activity_score': activity_score,
 					'consistency': consistency_score,
-					'leadership_score': leadership_score,
+					'collaboration_score': collaboration_score,
 					'contribution_percentage': contribution_percentage,
-					'overall_score': (efficiency_score * 0.4 + consistency_score * 0.3 + leadership_score * 0.3),
-					'commit_quality_analysis': {
+					'overall_score': (activity_score * 0.4 + consistency_score * 0.3 + collaboration_score * 0.3),
+					'commit_analysis': {
 						'avg_commit_size': avg_commit_size,
 						'small_commits_ratio': commit_patterns.get('small_commits', 0) / total_author_commits if total_author_commits > 0 else 0,
 						'large_commits_ratio': commit_patterns.get('large_commits', 0) / total_author_commits if total_author_commits > 0 else 0,
-						'bug_fix_ratio': bug_commits / total_author_commits if total_author_commits > 0 else 0,
+						'maintenance_ratio': maintenance_commits / total_author_commits if total_author_commits > 0 else 0,
 						'feature_ratio': feature_commits / total_author_commits if total_author_commits > 0 else 0
 					}
 				}
@@ -2882,6 +3010,22 @@ class GitDataCollector(DataCollector):
 		"""Get pace of changes by year."""
 		return dict(self.pace_of_changes_by_year)
 	
+	def getPaceOfChangesByWeek(self):
+		"""Get pace of changes aggregated by week."""
+		weekly_data = {}
+		for stamp, changes in self.pace_of_changes.items():
+			# Get the date from timestamp
+			date = datetime.datetime.fromtimestamp(stamp)
+			# Get Monday of the week (start of week)
+			monday = date - datetime.timedelta(days=date.weekday())
+			week_key = monday.strftime('%Y-%m-%d')
+			
+			if week_key not in weekly_data:
+				weekly_data[week_key] = 0
+			weekly_data[week_key] += changes
+		
+		return weekly_data
+	
 	def getFilesByYear(self):
 		"""Get file count by year."""
 		return dict(self.files_by_year)
@@ -3025,21 +3169,21 @@ class GitDataCollector(DataCollector):
 						   for author, perf in self.team_performance.items()]
 		return sorted(performance_data, key=lambda x: x[1], reverse=True)
 	
-	def getAuthorsByEfficiency(self):
-		"""Get authors sorted by efficiency score."""
-		performance_data = [(author, perf.get('efficiency_score', 0)) 
+	def getAuthorsByActivity(self):
+		"""Get authors sorted by activity score."""
+		performance_data = [(author, perf.get('activity_score', 0)) 
 						   for author, perf in self.team_performance.items()]
 		return sorted(performance_data, key=lambda x: x[1], reverse=True)
 	
-	def getAuthorsByConsistency(self):
-		"""Get authors sorted by consistency score."""
+	def getAuthorsByRegularity(self):
+		"""Get authors sorted by activity regularity score."""
 		performance_data = [(author, perf.get('consistency', 0)) 
 						   for author, perf in self.team_performance.items()]
 		return sorted(performance_data, key=lambda x: x[1], reverse=True)
 	
-	def getAuthorsByLeadership(self):
-		"""Get authors sorted by leadership score."""
-		performance_data = [(author, perf.get('leadership_score', 0)) 
+	def getAuthorsByCollaboration(self):
+		"""Get authors sorted by collaboration score."""
+		performance_data = [(author, perf.get('collaboration_score', 0)) 
 						   for author, perf in self.team_performance.items()]
 		return sorted(performance_data, key=lambda x: x[1], reverse=True)
 	
@@ -3266,12 +3410,12 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<dt>Bus Factor</dt><dd><strong>%d</strong> (minimum contributors for 50%% of work)</dd>' % bus_factor)
 		
 		if bus_factor <= 2:
-			bus_warning = '<span style="color: red;">⚠ High risk - very few contributors</span>'
+			contribution_distribution = '<span style="color: red;">Highly concentrated contribution (few contributors handle most work)</span>'
 		elif bus_factor <= 4:
-			bus_warning = '<span style="color: orange;">⚠ Medium risk - limited contributor diversity</span>'
+			contribution_distribution = '<span style="color: orange;">Moderately concentrated contribution</span>'
 		else:
-			bus_warning = '<span style="color: green;">✓ Good contributor diversity</span>'
-		f.write('<dt>Risk Assessment</dt><dd>%s</dd>' % bus_warning)
+			contribution_distribution = '<span style="color: green;">Well-distributed contribution across team</span>'
+		f.write('<dt>Contribution Distribution</dt><dd>%s</dd>' % contribution_distribution)
 		f.write('</dl>')
 		
 		# File Analysis
@@ -3342,9 +3486,9 @@ class HTMLReportCreator(ReportCreator):
 		
 		# Top contributors by different metrics
 		contrib_ranking = data.getAuthorsByContribution()
-		efficiency_ranking = data.getAuthorsByEfficiency()
-		consistency_ranking = data.getAuthorsByConsistency()
-		leadership_ranking = data.getAuthorsByLeadership()
+		activity_ranking = data.getAuthorsByActivity()
+		regularity_ranking = data.getAuthorsByRegularity()
+		collaboration_ranking = data.getAuthorsByCollaboration()
 		
 		f.write('<div class="rankings">')
 		f.write('<div class="ranking-section">')
@@ -3358,7 +3502,7 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<div class="ranking-section">')
 		f.write('<h3>Most Efficient (by Quality Score)</h3>')
 		f.write('<ol>')
-		for author, score in efficiency_ranking[:10]:
+		for author, score in activity_ranking[:10]:
 			f.write('<li>%s (%.1f)</li>' % (author, score))
 		f.write('</ol>')
 		f.write('</div>')
@@ -3366,7 +3510,7 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<div class="ranking-section">')
 		f.write('<h3>Most Consistent</h3>')
 		f.write('<ol>')
-		for author, score in consistency_ranking[:10]:
+		for author, score in regularity_ranking[:10]:
 			f.write('<li>%s (%.1f)</li>' % (author, score))
 		f.write('</ol>')
 		f.write('</div>')
@@ -3374,14 +3518,14 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<div class="ranking-section">')
 		f.write('<h3>Leadership Score</h3>')
 		f.write('<ol>')
-		for author, score in leadership_ranking[:10]:
+		for author, score in collaboration_ranking[:10]:
 			f.write('<li>%s (%.1f)</li>' % (author, score))
 		f.write('</ol>')
 		f.write('</div>')
 		f.write('</div>')
 
 		# Detailed Team Performance Table
-		f.write(html_header(2, 'Detailed Team Performance Analysis'))
+		f.write(html_header(2, 'Contributor Activity Metrics'))
 		f.write('<table class="team-performance sortable" id="team-performance">')
 		f.write('<tr>')
 		f.write('<th>Author</th>')
@@ -3389,11 +3533,11 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<th>Contrib %</th>')
 		f.write('<th>Lines Changed</th>')
 		f.write('<th>Avg Commit Size</th>')
-		f.write('<th>Efficiency</th>')
-		f.write('<th>Consistency</th>')
-		f.write('<th>Leadership</th>')
-		f.write('<th>Overall Score</th>')
-		f.write('<th>Assessment</th>')
+		f.write('<th>Activity Score</th>')
+		f.write('<th>Regularity Score</th>')
+		f.write('<th>Collaboration Score</th>')
+		f.write('<th>Composite Score</th>')
+		f.write('<th>Activity Pattern</th>')
 		f.write('</tr>')
 		
 		team_performance = data.getTeamPerformance()
@@ -3410,9 +3554,9 @@ class HTMLReportCreator(ReportCreator):
 			lines_changed = author_info.get('lines_added', 0) + author_info.get('lines_removed', 0)
 			contrib_pct = perf.get('contribution_percentage', 0)
 			avg_commit_size = patterns.get('avg_commit_size', 0)
-			efficiency = perf.get('efficiency_score', 0)
+			activity = perf.get('activity_score', 0)
 			consistency = perf.get('consistency', 0)
-			leadership = perf.get('leadership_score', 0)
+			collaboration = perf.get('collaboration_score', 0)
 			overall = perf.get('overall_score', 0)
 			
 			# Generate assessment
@@ -3424,9 +3568,9 @@ class HTMLReportCreator(ReportCreator):
 			f.write('<td>%.1f%%</td>' % contrib_pct)
 			f.write('<td>%d</td>' % lines_changed)
 			f.write('<td>%.1f</td>' % avg_commit_size)
-			f.write('<td>%.1f</td>' % efficiency)
+			f.write('<td>%.1f</td>' % activity)
 			f.write('<td>%.1f</td>' % consistency)
-			f.write('<td>%.1f</td>' % leadership)
+			f.write('<td>%.1f</td>' % collaboration)
 			f.write('<td>%.1f</td>' % overall)
 			f.write('<td>%s</td>' % assessment)
 			f.write('</tr>')
@@ -3505,7 +3649,7 @@ class HTMLReportCreator(ReportCreator):
 		f.write('</table>')
 
 		# Impact Analysis
-		f.write(html_header(2, 'Impact and Quality Analysis'))
+		f.write(html_header(2, 'Contribution Impact Analysis'))
 		
 		impact_analysis = data.getImpactAnalysis()
 		critical_files = data.getCriticalFiles()
@@ -3525,7 +3669,7 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<th>Author</th>')
 		f.write('<th>Impact Score</th>')
 		f.write('<th>Critical Files Touched</th>')
-		f.write('<th>Bug Potential</th>')
+		f.write('<th>Maintenance Work %</th>')
 		f.write('<th>High Impact Files</th>')
 		f.write('<th>Assessment</th>')
 		f.write('</tr>')
@@ -3536,29 +3680,23 @@ class HTMLReportCreator(ReportCreator):
 		for author, impact in sorted_impact:
 			impact_score = impact.get('impact_score', 0)
 			critical_files_touched = len(impact.get('critical_files', []))
-			bug_potential = impact.get('bug_potential', 0)
+			maintenance_percentage = impact.get('maintenance_percentage', 0)
 			high_impact_files = len(impact.get('high_impact_files', []))
 			
-			# Generate impact assessment
-			if impact_score > 200:
-				impact_assessment = "Very High Impact"
-			elif impact_score > 100:
-				impact_assessment = "High Impact"
-			elif impact_score > 50:
-				impact_assessment = "Medium Impact"
-			else:
-				impact_assessment = "Low Impact"
+			# Generate objective impact description
+			impact_assessment = f"Score: {impact_score:.1f}"
 			
-			if bug_potential > 30:
-				impact_assessment += " (High Bug Risk)"
-			elif bug_potential > 15:
-				impact_assessment += " (Medium Bug Risk)"
+			if critical_files_touched > 0:
+				impact_assessment += f", {critical_files_touched} critical files"
+			
+			if maintenance_percentage > 0:
+				impact_assessment += f", {maintenance_percentage:.1f}% maintenance commits"
 			
 			f.write('<tr>')
 			f.write('<td>%s</td>' % author)
 			f.write('<td>%.1f</td>' % impact_score)
 			f.write('<td>%d</td>' % critical_files_touched)
-			f.write('<td>%.1f%%</td>' % bug_potential)
+			f.write('<td>%.1f%%</td>' % maintenance_percentage)
 			f.write('<td>%d</td>' % high_impact_files)
 			f.write('<td>%s</td>' % impact_assessment)
 			f.write('</tr>')
@@ -3648,25 +3786,26 @@ class HTMLReportCreator(ReportCreator):
 
 		# Pace of Changes
 		f.write(html_header(2, 'Pace of Changes'))
-		f.write('<p>Number of line changes (additions + deletions) over time</p>')
-		pace_data = data.getPaceOfChanges()
-		if pace_data:
-			# Generate pace of changes data file
+		f.write('<p>Number of line changes (additions + deletions) over time (weekly aggregation)</p>')
+		weekly_pace_data = data.getPaceOfChangesByWeek()
+		if weekly_pace_data:
+			# Generate pace of changes data file (using weekly data)
 			fg = open(path + '/pace_of_changes.dat', 'w')
-			for stamp in sorted(pace_data.keys()):
-				fg.write('%d %d\n' % (stamp, pace_data[stamp]))
+			# Convert week dates to timestamps for the data file
+			for week_date in sorted(weekly_pace_data.keys()):
+				week_timestamp = int(datetime.datetime.strptime(week_date, '%Y-%m-%d').timestamp())
+				fg.write('%d %d\n' % (week_timestamp, weekly_pace_data[week_date]))
 			fg.close()
 			
-			# Display pace data as a table instead of chart
+			# Display weekly pace data as a table
 			if hasattr(self, 'table_data') and 'pace_of_changes' in self.table_data:
 				f.write(self.table_data['pace_of_changes'])
 			else:
-				# Fallback simple table
+				# Weekly aggregated table
 				f.write('<table class="sortable" id="pace_changes_detail">')
-				f.write('<tr><th>Date</th><th>Line Changes</th></tr>')
-				for stamp in sorted(pace_data.keys()):
-					date_str = datetime.datetime.fromtimestamp(stamp).strftime('%Y-%m-%d')
-					f.write('<tr><td>%s</td><td>%d</td></tr>' % (date_str, pace_data[stamp]))
+				f.write('<tr><th>Week Starting (Monday)</th><th>Line Changes</th></tr>')
+				for week_date in sorted(weekly_pace_data.keys()):
+					f.write('<tr><td>%s</td><td>%d</td></tr>' % (week_date, weekly_pace_data[week_date]))
 				f.write('</table>')
 		else:
 			f.write('<p>No pace data available.</p>')
@@ -3793,36 +3932,20 @@ class HTMLReportCreator(ReportCreator):
 			fp.write('%d %s %d\n' % (d + 1, WEEKDAYS[d], commits))
 		fp.close()
 		
-		# Display day of week data as a table instead of chart
+		# Display consolidated day of week data as a single table
 		if hasattr(self, 'table_data') and 'day_of_week' in self.table_data:
 			f.write(self.table_data['day_of_week'])
 		else:
-			# Fallback simple table
-			f.write('<table class="sortable" id="day_of_week_detail">')
-			f.write('<tr><th>Day</th><th>Commits</th><th>Percentage</th></tr>')
+			# Consolidated table with day, commits, percentage, and total
+			f.write('<table class="sortable day-of-week" id="day_of_week_detail">')
+			f.write('<tr><th>Day of Week</th><th>Commits</th><th>Percentage</th><th>Total (%)</th></tr>')
 			total_commits_week = sum(day_of_week.values()) if day_of_week else 0
 			for d in range(0, 7):
 				commits = day_of_week.get(d, 0)
-				percent = (commits * 100.0 / total_commits_week) if total_commits_week > 0 else 0
-				f.write('<tr><td>%s</td><td>%d</td><td>%.1f%%</td></tr>' % (WEEKDAYS[d], commits, percent))
-			f.write('</table>')
-		f.write('<div class="vtable"><table>')
-		f.write('<tr><th>Day</th><th>Total (%)</th></tr>')
-		for d in range(0, 7):
-			commits = 0
-			if d in day_of_week:
-				commits = day_of_week[d]
-			f.write('<tr>')
-			f.write('<th>%s</th>' % (WEEKDAYS[d]))
-			if d in day_of_week:
-				percent = (100.0 * day_of_week[d]) / totalcommits if totalcommits else 0.0
-				f.write('<td>%d (%.2f%%)</td>' % (day_of_week[d], percent))
-			else:
-				f.write('<td>0</td>')
-			f.write('</tr>')
-		f.write('</table></div>')
-
-		# Hour of Week
+				week_percent = (commits * 100.0 / total_commits_week) if total_commits_week > 0 else 0
+				total_percent = (100.0 * commits) / totalcommits if totalcommits else 0.0
+				f.write('<tr><td>%s</td><td>%d</td><td>%.1f%%</td><td>%.2f%%</td></tr>' % (WEEKDAYS[d], commits, week_percent, total_percent))
+			f.write('</table>')		# Hour of Week
 		f.write(html_header(2, 'Hour of Week'))
 		f.write('<table>')
 
@@ -4139,107 +4262,6 @@ class HTMLReportCreator(ReportCreator):
 		f.write('</div>  <!-- end authors section -->')
 
 		###
-		# Branches section
-		f.write('<div id="branches" class="section">')
-		f.write(html_header(2, 'Branches'))
-
-		# Branch summary
-		branches = data.getBranches() if hasattr(data, 'getBranches') else {}
-		unmerged_branches = data.getUnmergedBranches() if hasattr(data, 'getUnmergedBranches') else []
-		main_branch = data.getMainBranch() if hasattr(data, 'getMainBranch') else 'master'
-		
-		f.write('<dl>')
-		f.write('<dt>Total Branches</dt><dd>%d</dd>' % len(branches))
-		if unmerged_branches:
-			f.write('<dt>Unmerged Branches</dt><dd>%d</dd>' % len(unmerged_branches))
-		f.write('<dt>Main Branch</dt><dd>%s</dd>' % main_branch)
-		f.write('</dl>')
-
-		if branches:
-			# Branches :: All Branches
-			f.write(html_header(2, 'All Branches'))
-			f.write('<table class="branches sortable" id="branches">')
-			f.write('<tr><th>Branch</th><th>Status</th><th>Commits</th><th>Lines Added</th><th>Lines Removed</th><th>Total Changes</th><th>Authors</th></tr>')
-			
-			# Sort branches by total changes (lines added + removed)
-			sorted_branches = sorted(branches.items(), 
-									key=lambda x: x[1].get('lines_added', 0) + x[1].get('lines_removed', 0), 
-									reverse=True)
-			
-			for branch_name, branch_info in sorted_branches:
-				status = 'Merged' if branch_info.get('is_merged', True) else 'Unmerged'
-				commits = branch_info.get('commits', 0)
-				lines_added = branch_info.get('lines_added', 0)
-				lines_removed = branch_info.get('lines_removed', 0)
-				total_changes = lines_added + lines_removed
-				authors_count = len(branch_info.get('authors', {}))
-				
-				# Highlight unmerged branches
-				row_class = 'class="unmerged"' if not branch_info.get('is_merged', True) else ''
-				f.write('<tr %s><td>%s</td><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td></tr>' % 
-						(row_class, branch_name, status, commits, lines_added, lines_removed, total_changes, authors_count))
-			f.write('</table>')
-
-			# Unmerged Branches Detail
-			if unmerged_branches:
-				f.write(html_header(2, 'Unmerged Branches Detail'))
-				f.write('<p>These branches have not been merged into the main branch (%s) and may represent ongoing work or abandoned features.</p>' % main_branch)
-				
-				f.write('<table class="unmerged-branches sortable" id="unmerged">')
-				f.write('<tr><th>Branch</th><th>Commits</th><th>Authors</th><th>Top Contributors</th><th>Lines Added</th><th>Lines Removed</th></tr>')
-				
-				unmerged_stats = data.getUnmergedBranchStats() if hasattr(data, 'getUnmergedBranchStats') else {}
-				
-				for branch_name in unmerged_branches:
-					if branch_name in unmerged_stats:
-						branch_info = unmerged_stats[branch_name]
-						commits = branch_info.get('commits', 0)
-						authors = branch_info.get('authors', {})
-						lines_added = branch_info.get('lines_added', 0)
-						lines_removed = branch_info.get('lines_removed', 0)
-						
-						# Get top contributors
-						top_contributors = sorted(authors.items(), key=lambda x: x[1].get('commits', 0), reverse=True)[:3]
-						contributors_str = ', '.join([f"{author} ({info.get('commits', 0)})" for author, info in top_contributors])
-						
-						f.write('<tr><td>%s</td><td>%d</td><td>%d</td><td>%s</td><td>%d</td><td>%d</td></tr>' % 
-								(branch_name, commits, len(authors), contributors_str, lines_added, lines_removed))
-				f.write('</table>')
-
-			# Branch Activity by Author
-			f.write(html_header(2, 'Branch Activity by Author'))
-			f.write('<p>This table shows which authors have contributed to which branches.</p>')
-			
-			# Collect all unique authors across all branches
-			all_authors = set()
-			for branch_info in branches.values():
-				all_authors.update(branch_info.get('authors', {}).keys())
-			
-			if all_authors and len(branches) > 1:
-				f.write('<table class="branch-authors sortable" id="branch-authors">')
-				header = '<tr><th>Author</th>'
-				for branch_name in sorted(branches.keys()):
-					header += '<th>%s</th>' % branch_name
-				header += '<th>Total Branches</th></tr>'
-				f.write(header)
-				
-				for author in sorted(all_authors):
-					row = '<tr><td>%s</td>' % author
-					branch_count = 0
-					for branch_name in sorted(branches.keys()):
-						branch_authors = branches[branch_name].get('authors', {})
-						if author in branch_authors:
-							commits = branch_authors[author].get('commits', 0)
-							row += '<td>%d</td>' % commits
-							branch_count += 1
-						else:
-							row += '<td>-</td>'
-					row += '<td>%d</td></tr>' % branch_count
-					f.write(row)
-				f.write('</table>')
-		f.write('</div>  <!-- end branches section -->')
-
-		###
 		# Files section
 		f.write('<div id="files" class="section">')
 		f.write(html_header(2, 'Files'))
@@ -4535,54 +4557,45 @@ class HTMLReportCreator(ReportCreator):
 		self.createTableData(path)
 	
 	def _generateAssessment(self, performance, patterns):
-		"""Generate a text assessment for an author based on their performance metrics."""
-		efficiency = performance.get('efficiency_score', 0)
+		"""Generate an objective, fact-based analysis for an author based on their metrics."""
+		activity = performance.get('activity_score', 0)
 		consistency = performance.get('consistency', 0)
-		leadership = performance.get('leadership_score', 0)
+		collaboration = performance.get('collaboration_score', 0)
 		contribution = performance.get('contribution_percentage', 0)
 		
 		small_commits_ratio = patterns.get('small_commits', 0) / max(patterns.get('total_commits', 1), 1)
 		large_commits_ratio = patterns.get('large_commits', 0) / max(patterns.get('total_commits', 1), 1)
 		
-		assessments = []
+		metrics = []
 		
-		# Contribution level
-		if contribution > 25:
-			assessments.append("Major Contributor")
-		elif contribution > 10:
-			assessments.append("Regular Contributor")
-		elif contribution > 2:
-			assessments.append("Minor Contributor")
-		else:
-			assessments.append("Occasional Contributor")
+		# Contribution level (factual percentage)
+		metrics.append(f"{contribution:.1f}% of total commits")
 		
-		# Quality assessment
-		if efficiency > 80:
-			assessments.append("High Quality")
-		elif efficiency > 60:
-			assessments.append("Good Quality")
-		elif efficiency > 40:
-			assessments.append("Average Quality")
-		else:
-			assessments.append("Needs Improvement")
-		
-		# Work pattern assessment
+		# Activity patterns (factual description)
 		if small_commits_ratio > 0.7:
-			assessments.append("Frequent Small Commits")
+			metrics.append(f"{small_commits_ratio*100:.0f}% small commits")
 		elif large_commits_ratio > 0.3:
-			assessments.append("Prefers Large Commits")
+			metrics.append(f"{large_commits_ratio*100:.0f}% large commits")
+		else:
+			metrics.append("Balanced commit sizes")
 		
-		if consistency > 80:
-			assessments.append("Very Consistent")
-		elif consistency > 60:
-			assessments.append("Consistent")
+		# Consistency metric (factual)
+		if consistency >= 80:
+			metrics.append(f"High consistency ({consistency:.0f}/100)")
+		elif consistency >= 60:
+			metrics.append(f"Moderate consistency ({consistency:.0f}/100)")
+		else:
+			metrics.append(f"Variable activity ({consistency:.0f}/100)")
 		
-		if leadership > 70:
-			assessments.append("Leadership Role")
-		elif leadership > 50:
-			assessments.append("Collaborative")
+		# Collaboration indicator (factual)
+		if collaboration >= 70:
+			metrics.append(f"Extensive collaboration ({collaboration:.0f}/100)")
+		elif collaboration >= 50:
+			metrics.append(f"Regular collaboration ({collaboration:.0f}/100)")
+		else:
+			metrics.append(f"Limited collaboration ({collaboration:.0f}/100)")
 		
-		return ", ".join(assessments) if assessments else "Standard Contributor"
+		return ", ".join(metrics) if metrics else "Standard activity pattern"
 	
 	def createTableData(self, path):
 		print('Generating table data for reports...')
