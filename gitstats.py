@@ -717,21 +717,7 @@ class DataCollector:
 
 		# Enhanced project health metrics - consolidated and optimized
 		self.project_health = {
-			'overall_health_score': 0.0,
-			'trend_direction': 'stable',
-			'risk_level': 'low',
-			'quality_gate_status': 'unknown',
-			'actionable_issues': [],
-			
-			# Documentation metrics
-			'documentation_quality': {
-				'comment_lines': 0,
-				'documentation_files': 0,
-				'documented_functions': 0,
-				'total_functions': 0,
-				'readme_sections': 0,
-				'docstring_coverage': 0.0
-			},
+
 			
 			# Code quality metrics
 			'code_quality': {
@@ -1300,27 +1286,7 @@ class DataCollector:
 	
 	# Enhanced Metrics Calculation Methods - College Project Implementation
 	
-	def calculate_documentation_quality(self):
-		"""Calculate documentation quality metrics (12% weight priority)"""
-		if self.repository_stats['total_lines'] == 0:
-			return 0.0
-			
-		doc_metrics = self.project_health['documentation_quality']
-		comment_density = (doc_metrics['comment_lines'] / self.repository_stats['total_lines']) * 100
-		
-		# API documentation coverage
-		if doc_metrics['total_functions'] > 0:
-			api_coverage = (doc_metrics['documented_functions'] / doc_metrics['total_functions']) * 100
-		else:
-			api_coverage = 0
-		
-		# README quality (basic assessment)
-		readme_score = min(doc_metrics['readme_sections'] * 20, 100)
-		
-		# Weighted documentation score
-		doc_score = (comment_density * 0.4 + api_coverage * 0.4 + readme_score * 0.2)
-		
-		return min(doc_score, 100.0)
+
 	
 	def calculate_bus_factor(self):
 		"""Calculate knowledge distribution risk (Bus Factor)"""
@@ -1358,9 +1324,7 @@ class DataCollector:
 			complexity_score = max(0, 100 - (avg_complexity - 10) * 10)  # Penalize complexity > 10
 			scores.append(complexity_score)
 		
-		# Documentation score
-		doc_score = self.calculate_documentation_quality()
-		scores.append(doc_score)
+
 		
 		# Team collaboration score
 		bus_factor = self.calculate_bus_factor()
@@ -1393,12 +1357,7 @@ class DataCollector:
 				# Count control structures (basic cyclomatic complexity)
 				if any(keyword in line for keyword in ['if ', 'elif ', 'else:', 'for ', 'while ', 'try:', 'except', 'case ', 'switch']):
 					complexity += 1
-				# Count function definitions
-				if line.startswith('def ') or line.startswith('function ') or 'function(' in line:
-					self.project_health['documentation_quality']['total_functions'] += 1
-					# Check for docstring/comments after function
-					if '"""' in content or "'''" in content or '/*' in content:
-						self.project_health['documentation_quality']['documented_functions'] += 1
+
 			
 			return complexity
 			
@@ -1429,8 +1388,6 @@ class DataCollector:
 				if '"""' in line or "'''" in line:
 					comment_lines += 1
 			
-			self.project_health['documentation_quality']['comment_lines'] += comment_lines
-			
 			# Complexity analysis
 			complexity = self.analyze_file_complexity(filepath)
 			self.project_health['code_quality']['cyclomatic_complexity'] += complexity
@@ -1441,79 +1398,7 @@ class DataCollector:
 		except Exception as e:
 			pass  # Skip files that can't be read
 	
-	def calculate_project_health_score(self):
-		"""Calculate overall project health score for college project"""
-		scores = {}
-		
-		# 1. Documentation Quality (12% weight)
-		scores['documentation'] = self.calculate_documentation_quality() * 0.12
-		
-		# 2. Code Quality (20% weight)
-		scores['code_quality'] = self.calculate_code_quality_score() * 0.20
-		
-		# 3. Team Collaboration (15% weight) 
-		bus_factor = self.calculate_bus_factor()
-		collaboration_score = min(bus_factor * 20, 100)  # Scale bus factor
-		scores['collaboration'] = collaboration_score * 0.15
-		
-		# 4. Project Activity (10% weight)
-		if self.repository_stats['total_commits'] > 0:
-			# More commits in recent period = better activity
-			activity_score = min((self.repository_stats['total_commits'] / 10) * 10, 100)
-		else:
-			activity_score = 0
-		scores['activity'] = activity_score * 0.10
-		
-		# 5. File Organization (8% weight)
-		if self.repository_stats['total_files'] > 0:
-			large_files_penalty = len(self.code_analysis['large_files']) / self.repository_stats['total_files']
-			org_score = max(0, 100 - (large_files_penalty * 50))
-		else:
-			org_score = 50
-		scores['organization'] = org_score * 0.08
-		
-		# 6. Basic Technical Metrics (35% weight - remaining)
-		if self.repository_stats['total_lines'] > 0:
-			lines_per_commit = self.repository_stats['total_lines'] / max(self.repository_stats['total_commits'], 1)
-			# Reasonable lines per commit (not too high, not too low)
-			technical_score = max(0, 100 - abs(lines_per_commit - 50))
-		else:
-			technical_score = 50
-		scores['technical'] = technical_score * 0.35
-		
-		# Calculate total
-		total_score = sum(scores.values())
-		
-		# Update project health
-		self.project_health['overall_health_score'] = total_score
-		
-		# Set risk level
-		if total_score >= 80:
-			self.project_health['risk_level'] = 'low'
-			self.project_health['quality_gate_status'] = 'passed'
-		elif total_score >= 60:
-			self.project_health['risk_level'] = 'medium' 
-			self.project_health['quality_gate_status'] = 'warning'
-		else:
-			self.project_health['risk_level'] = 'high'
-			self.project_health['quality_gate_status'] = 'failed'
-		
-		# Generate actionable recommendations
-		self.project_health['actionable_issues'] = []
-		
-		if scores['documentation'] < 10:
-			self.project_health['actionable_issues'].append('Improve code documentation and comments')
-		
-		if scores['collaboration'] < 10:
-			self.project_health['actionable_issues'].append('Increase team collaboration - current bus factor too low')
-		
-		if len(self.code_analysis['large_files']) > 5:
-			self.project_health['actionable_issues'].append('Consider breaking down large files (>500 LOC)')
-		
-		if len(self.code_analysis['complex_files']) > 3:
-			self.project_health['actionable_issues'].append('Reduce complexity in identified complex files')
-		
-		return total_score
+
 	
 	def getTags(self):
 		return []
@@ -1599,12 +1484,14 @@ class DataCollector:
 			halstead_metrics = self._calculate_halstead_metrics(content, ext)
 			mccabe_metrics = self._calculate_mccabe_complexity(content, ext)
 			maintainability_index = self._calculate_maintainability_index(loc_metrics, halstead_metrics, mccabe_metrics)
+			oop_metrics = self._calculate_oop_metrics(content, ext, filepath)
 			
 			return {
 				'loc': loc_metrics,
 				'halstead': halstead_metrics,
 				'mccabe': mccabe_metrics,
 				'maintainability_index': maintainability_index,
+				'oop': oop_metrics,
 				'filepath': filepath,
 				'extension': ext
 			}
@@ -2056,6 +1943,9 @@ class DataCollector:
 		except (ValueError, OverflowError, ZeroDivisionError) as e:
 			if conf['debug']:
 				print(f'Warning: Maintainability Index calculation failed: {e}')
+				print(f'  Input values - loc_metrics: {loc_metrics}')
+				print(f'  Input values - halstead_metrics: {halstead_metrics}')
+				print(f'  Input values - mccabe_metrics: {mccabe_metrics}')
 			return {
 				'mi': 0.0,
 				'mi_woc': 0.0,
@@ -2073,6 +1963,416 @@ class DataCollector:
 			return 'difficult'     # Difficult to maintain
 		else:
 			return 'critical'      # Critical/pathological case
+	
+	def _calculate_oop_metrics(self, content, file_extension, filepath):
+		"""Calculate Object-Oriented Programming software metrics.
+		
+		Calculates:
+		- Efferent Coupling (Ce): Number of classes this class depends on
+		- Afferent Coupling (Ca): Number of classes that depend on this class  
+		- Instability (I): Ce / (Ce + Ca)
+		- Abstractness (A): Abstract classes / Total classes
+		- Distance from Main Sequence (D): |A + I - 1|
+		"""
+		import re
+		
+		# Initialize OOP metrics
+		metrics = {
+			'classes_defined': 0,
+			'abstract_classes': 0,
+			'interfaces_defined': 0,
+			'efferent_coupling': 0,
+			'afferent_coupling': 0,
+			'instability': 0.0,
+			'abstractness': 0.0,
+			'distance_main_sequence': 0.0,
+			'inheritance_depth': 0,
+			'method_count': 0,
+			'attribute_count': 0
+		}
+		
+		if not content.strip():
+			return metrics
+		
+		try:
+			# Remove comments and strings for accurate analysis
+			cleaned_content = self._remove_comments_and_strings(content, file_extension)
+			
+			# Language-specific OOP analysis
+			if file_extension in ['.java', '.scala', '.kt']:
+				metrics.update(self._analyze_java_oop_metrics(cleaned_content))
+			elif file_extension in ['.py', '.pyi']:
+				metrics.update(self._analyze_python_oop_metrics(cleaned_content))
+			elif file_extension in ['.cpp', '.cc', '.cxx', '.hpp', '.hxx', '.h']:
+				metrics.update(self._analyze_cpp_oop_metrics(cleaned_content))
+			elif file_extension in ['.js', '.ts', '.jsx', '.tsx']:
+				metrics.update(self._analyze_javascript_oop_metrics(cleaned_content))
+			elif file_extension in ['.swift']:
+				metrics.update(self._analyze_swift_oop_metrics(cleaned_content))
+			elif file_extension in ['.go']:
+				metrics.update(self._analyze_go_oop_metrics(cleaned_content))
+			elif file_extension in ['.rs']:
+				metrics.update(self._analyze_rust_oop_metrics(cleaned_content))
+			
+			# Calculate derived metrics
+			if metrics['classes_defined'] > 0:
+				metrics['abstractness'] = metrics['abstract_classes'] / metrics['classes_defined']
+			
+			ce = metrics['efferent_coupling']
+			ca = metrics['afferent_coupling'] 
+			if (ce + ca) > 0:
+				metrics['instability'] = ce / (ce + ca)
+			
+			# Distance from Main Sequence: D = |A + I - 1|
+			metrics['distance_main_sequence'] = abs(metrics['abstractness'] + metrics['instability'] - 1.0)
+			
+		except Exception as e:
+			if conf['debug']:
+				print(f'Warning: OOP metrics calculation failed for {filepath}: {e}')
+		
+		return metrics
+	
+	def _analyze_java_oop_metrics(self, content):
+		"""Analyze OOP metrics for Java/Scala/Kotlin files."""
+		import re
+		
+		metrics = {
+			'classes_defined': 0,
+			'abstract_classes': 0,
+			'interfaces_defined': 0,
+			'efferent_coupling': 0,
+			'method_count': 0,
+			'attribute_count': 0,
+			'inheritance_depth': 0
+		}
+		
+		# Count classes (including inner classes)
+		class_patterns = [
+			r'\bclass\s+\w+',
+			r'\benum\s+\w+',
+			r'\b@interface\s+\w+'
+		]
+		for pattern in class_patterns:
+			matches = re.findall(pattern, content, re.MULTILINE)
+			metrics['classes_defined'] += len(matches)
+		
+		# Count abstract classes
+		abstract_patterns = [
+			r'\babstract\s+class\s+\w+',
+			r'\babstract\s+.*\s+class\s+\w+'
+		]
+		for pattern in abstract_patterns:
+			matches = re.findall(pattern, content, re.MULTILINE)
+			metrics['abstract_classes'] += len(matches)
+		
+		# Count interfaces
+		interface_patterns = [r'\binterface\s+\w+']
+		for pattern in interface_patterns:
+			matches = re.findall(pattern, content, re.MULTILINE)
+			metrics['interfaces_defined'] += len(matches)
+			metrics['abstract_classes'] += len(matches)  # Interfaces are abstract
+		
+		# Count methods (public, private, protected)
+		method_patterns = [
+			r'\b(public|private|protected|static).*\s+\w+\s*\([^)]*\)\s*\{',
+			r'\b\w+\s*\([^)]*\)\s*\{'  # Basic method pattern
+		]
+		for pattern in method_patterns:
+			matches = re.findall(pattern, content, re.MULTILINE)
+			metrics['method_count'] += len(matches)
+		
+		# Count attributes/fields
+		field_patterns = [
+			r'\b(public|private|protected|static)\s+[\w<>,\[\]]+\s+\w+\s*[=;]',
+			r'\bprivate\s+[\w<>,\[\]]+\s+\w+',
+			r'\bpublic\s+[\w<>,\[\]]+\s+\w+',
+			r'\bprotected\s+[\w<>,\[\]]+\s+\w+'
+		]
+		for pattern in field_patterns:
+			matches = re.findall(pattern, content, re.MULTILINE)
+			metrics['attribute_count'] += len(matches)
+		
+		# Estimate coupling by counting imports and new object creations
+		import_matches = re.findall(r'\bimport\s+[\w.]+', content)
+		new_matches = re.findall(r'\bnew\s+\w+\s*\(', content)
+		metrics['efferent_coupling'] = len(set(import_matches)) + len(new_matches)
+		
+		return metrics
+	
+	def _analyze_python_oop_metrics(self, content):
+		"""Analyze OOP metrics for Python files."""
+		import re
+		
+		metrics = {
+			'classes_defined': 0,
+			'abstract_classes': 0,
+			'interfaces_defined': 0,
+			'efferent_coupling': 0,
+			'method_count': 0,
+			'attribute_count': 0,
+			'inheritance_depth': 0
+		}
+		
+		# Count classes
+		class_matches = re.findall(r'^class\s+\w+.*:', content, re.MULTILINE)
+		metrics['classes_defined'] = len(class_matches)
+		
+		# Count abstract classes (ABC or abstractmethod)
+		abstract_patterns = [
+			r'from\s+abc\s+import',
+			r'@abstractmethod',
+			r'ABC\)',
+			r'class.*ABC.*:'
+		]
+		has_abc = any(re.search(pattern, content) for pattern in abstract_patterns)
+		if has_abc and metrics['classes_defined'] > 0:
+			metrics['abstract_classes'] = 1  # Conservative estimate
+		
+		# Count methods (def within classes)
+		method_matches = re.findall(r'^\s+def\s+\w+\s*\(.*\):', content, re.MULTILINE)
+		metrics['method_count'] = len(method_matches)
+		
+		# Count attributes (self.attribute assignments)
+		attribute_matches = re.findall(r'self\.\w+\s*=', content)
+		metrics['attribute_count'] = len(set(attribute_matches))
+		
+		# Estimate coupling by counting imports
+		import_matches = re.findall(r'^(?:from\s+[\w.]+\s+)?import\s+[\w.,\s]+', content, re.MULTILINE)
+		metrics['efferent_coupling'] = len(import_matches)
+		
+		return metrics
+	
+	def _analyze_cpp_oop_metrics(self, content):
+		"""Analyze OOP metrics for C++ files."""
+		import re
+		
+		metrics = {
+			'classes_defined': 0,
+			'abstract_classes': 0,
+			'interfaces_defined': 0,
+			'efferent_coupling': 0,
+			'method_count': 0,
+			'attribute_count': 0,
+			'inheritance_depth': 0
+		}
+		
+		# Count classes and structs
+		class_patterns = [
+			r'\bclass\s+\w+',
+			r'\bstruct\s+\w+'
+		]
+		for pattern in class_patterns:
+			matches = re.findall(pattern, content)
+			metrics['classes_defined'] += len(matches)
+		
+		# Count abstract classes (virtual methods)
+		virtual_matches = re.findall(r'virtual\s+.*\s*=\s*0\s*;', content)
+		if virtual_matches:
+			metrics['abstract_classes'] = 1  # Conservative estimate
+		
+		# Count methods (function definitions in classes)
+		method_patterns = [
+			r'\b\w+\s*\([^)]*\)\s*\{',
+			r'\b(public|private|protected):\s*\n\s*\w+\s*\([^)]*\)'
+		]
+		for pattern in method_patterns:
+			matches = re.findall(pattern, content, re.MULTILINE)
+			metrics['method_count'] += len(matches)
+		
+		# Count attributes (member variables)
+		member_patterns = [
+			r'\b(public|private|protected):\s*\n\s*[\w<>,\*&\[\]]+\s+\w+\s*;',
+			r'^\s*[\w<>,\*&\[\]]+\s+\w+\s*;', 
+		]
+		for pattern in member_patterns:
+			matches = re.findall(pattern, content, re.MULTILINE)
+			metrics['attribute_count'] += len(matches)
+		
+		# Estimate coupling by counting includes
+		include_matches = re.findall(r'#include\s*[<"][\w./]+[>"]', content)
+		metrics['efferent_coupling'] = len(include_matches)
+		
+		return metrics
+	
+	def _analyze_javascript_oop_metrics(self, content):
+		"""Analyze OOP metrics for JavaScript/TypeScript files.""" 
+		import re
+		
+		metrics = {
+			'classes_defined': 0,
+			'abstract_classes': 0,
+			'interfaces_defined': 0,
+			'efferent_coupling': 0,
+			'method_count': 0,
+			'attribute_count': 0,
+			'inheritance_depth': 0
+		}
+		
+		# Count classes
+		class_matches = re.findall(r'\bclass\s+\w+', content)
+		metrics['classes_defined'] = len(class_matches)
+		
+		# Count interfaces (TypeScript)
+		interface_matches = re.findall(r'\binterface\s+\w+', content)
+		metrics['interfaces_defined'] = len(interface_matches)
+		metrics['abstract_classes'] += len(interface_matches)
+		
+		# Count abstract classes (TypeScript)
+		abstract_matches = re.findall(r'\babstract\s+class\s+\w+', content)
+		metrics['abstract_classes'] += len(abstract_matches)
+		
+		# Count methods
+		method_patterns = [
+			r'\b\w+\s*\([^)]*\)\s*\{',
+			r'\b\w+:\s*\([^)]*\)\s*=>'
+		]
+		for pattern in method_patterns:
+			matches = re.findall(pattern, content)
+			metrics['method_count'] += len(matches)
+		
+		# Count properties/attributes
+		property_patterns = [
+			r'this\.\w+\s*=',
+			r'\b\w+:\s*[\w\[\]<>]+\s*[;,]'
+		]
+		for pattern in property_patterns:
+			matches = re.findall(pattern, content)
+			metrics['attribute_count'] += len(matches)
+		
+		# Estimate coupling by counting imports/requires
+		import_patterns = [
+			r'import\s+.*\s+from\s+["\'][\w./]+["\']',
+			r'require\s*\(["\'][\w./]+["\']\)'
+		]
+		for pattern in import_patterns:
+			matches = re.findall(pattern, content)
+			metrics['efferent_coupling'] += len(matches)
+		
+		return metrics
+	
+	def _analyze_swift_oop_metrics(self, content):
+		"""Analyze OOP metrics for Swift files."""
+		import re
+		
+		metrics = {
+			'classes_defined': 0,
+			'abstract_classes': 0,
+			'interfaces_defined': 0,
+			'efferent_coupling': 0,
+			'method_count': 0,
+			'attribute_count': 0,
+			'inheritance_depth': 0
+		}
+		
+		# Count classes and structs
+		class_patterns = [
+			r'\bclass\s+\w+',
+			r'\bstruct\s+\w+'
+		]
+		for pattern in class_patterns:
+			matches = re.findall(pattern, content)
+			metrics['classes_defined'] += len(matches)
+		
+		# Count protocols (Swift's interfaces)
+		protocol_matches = re.findall(r'\bprotocol\s+\w+', content)
+		metrics['interfaces_defined'] = len(protocol_matches)
+		metrics['abstract_classes'] += len(protocol_matches)
+		
+		# Count methods/functions
+		method_matches = re.findall(r'\bfunc\s+\w+\s*\(', content)
+		metrics['method_count'] = len(method_matches)
+		
+		# Count properties
+		property_patterns = [
+			r'\bvar\s+\w+\s*:',
+			r'\blet\s+\w+\s*:'
+		]
+		for pattern in property_patterns:
+			matches = re.findall(pattern, content)
+			metrics['attribute_count'] += len(matches)
+		
+		# Estimate coupling by counting imports
+		import_matches = re.findall(r'\bimport\s+\w+', content)
+		metrics['efferent_coupling'] = len(import_matches)
+		
+		return metrics
+	
+	def _analyze_go_oop_metrics(self, content):
+		"""Analyze OOP-like metrics for Go files."""
+		import re
+		
+		metrics = {
+			'classes_defined': 0,
+			'abstract_classes': 0,
+			'interfaces_defined': 0,
+			'efferent_coupling': 0,
+			'method_count': 0,
+			'attribute_count': 0,
+			'inheritance_depth': 0
+		}
+		
+		# Count structs (Go's equivalent to classes)
+		struct_matches = re.findall(r'\btype\s+\w+\s+struct\s*\{', content)
+		metrics['classes_defined'] = len(struct_matches)
+		
+		# Count interfaces
+		interface_matches = re.findall(r'\btype\s+\w+\s+interface\s*\{', content)
+		metrics['interfaces_defined'] = len(interface_matches)
+		metrics['abstract_classes'] = len(interface_matches)
+		
+		# Count methods (functions with receivers)
+		method_matches = re.findall(r'\bfunc\s*\([^)]*\)\s*\w+\s*\(', content)
+		metrics['method_count'] = len(method_matches)
+		
+		# Count struct fields
+		# This is a simple approximation - count field-like declarations in structs
+		field_matches = re.findall(r'^\s*\w+\s+[\w\[\]\*]+\s*$', content, re.MULTILINE)
+		metrics['attribute_count'] = len(field_matches)
+		
+		# Estimate coupling by counting imports
+		import_matches = re.findall(r'\bimport\s+["\w/.-]+', content)
+		metrics['efferent_coupling'] = len(import_matches)
+		
+		return metrics
+	
+	def _analyze_rust_oop_metrics(self, content):
+		"""Analyze OOP-like metrics for Rust files."""
+		import re
+		
+		metrics = {
+			'classes_defined': 0,
+			'abstract_classes': 0,
+			'interfaces_defined': 0,
+			'efferent_coupling': 0,
+			'method_count': 0,
+			'attribute_count': 0,
+			'inheritance_depth': 0
+		}
+		
+		# Count structs and enums (Rust's data types)
+		struct_matches = re.findall(r'\bstruct\s+\w+', content)
+		enum_matches = re.findall(r'\benum\s+\w+', content)
+		metrics['classes_defined'] = len(struct_matches) + len(enum_matches)
+		
+		# Count traits (Rust's interfaces)
+		trait_matches = re.findall(r'\btrait\s+\w+', content)
+		metrics['interfaces_defined'] = len(trait_matches)
+		metrics['abstract_classes'] = len(trait_matches)
+		
+		# Count impl methods
+		method_matches = re.findall(r'\bfn\s+\w+\s*\(', content)
+		metrics['method_count'] = len(method_matches)
+		
+		# Count struct fields (simplified)
+		field_matches = re.findall(r'^\s*\w+\s*:\s*[\w<>,\[\]]+\s*,?', content, re.MULTILINE)
+		metrics['attribute_count'] = len(field_matches)
+		
+		# Estimate coupling by counting use statements
+		use_matches = re.findall(r'\buse\s+[\w:]+', content)
+		extern_matches = re.findall(r'\bextern\s+crate\s+\w+', content)
+		metrics['efferent_coupling'] = len(use_matches) + len(extern_matches)
+		
+		return metrics
 	
 	def _calculate_comprehensive_project_metrics(self):
 		"""Calculate comprehensive code quality metrics for the entire project."""
@@ -2117,7 +2417,25 @@ class DataCollector:
 					'moderate': 0,
 					'difficult': 0,
 					'critical': 0
-				}
+				},
+				'mi_file_details': {
+					'good': [],
+					'moderate': [],
+					'difficult': [],
+					'critical': []
+				},
+				# OOP metrics totals
+				'total_classes': 0,
+				'total_abstract_classes': 0,
+				'total_interfaces': 0,
+				'total_methods': 0,
+				'total_attributes': 0,
+				'total_efferent_coupling': 0.0,
+				'total_afferent_coupling': 0.0,
+				'total_instability': 0.0,
+				'total_abstractness': 0.0,
+				'total_distance_main_sequence': 0.0,
+				'files_with_oop': 0
 			}
 			
 			# Analyze each file
@@ -2150,10 +2468,40 @@ class DataCollector:
 					project_totals['total_cyclomatic_complexity'] += complexity
 					project_totals['max_cyclomatic_complexity'] = max(project_totals['max_cyclomatic_complexity'], complexity)
 					
-					# Aggregate Maintainability Index
+					# Aggregate Maintainability Index (use raw values for aggregation)
 					mi = metrics['maintainability_index']
-					project_totals['total_maintainability_index'] += mi['mi']
-					project_totals['files_by_maintainability'][mi['interpretation']] += 1
+					project_totals['total_maintainability_index'] += mi['mi_raw']
+					mi_category = mi['interpretation']
+					project_totals['files_by_maintainability'][mi_category] += 1
+					
+					# Store detailed file information for MI analysis
+					file_info = {
+						'filepath': filepath,
+						'mi_score': mi['mi'],
+						'mi_raw': mi['mi_raw'],
+						'extension': metrics['extension'],
+						'loc': metrics['loc']['loc_phy'],
+						'complexity': metrics['mccabe']['cyclomatic_complexity']
+					}
+					project_totals['mi_file_details'][mi_category].append(file_info)
+					
+					# Aggregate OOP metrics
+					oop = metrics['oop']
+					project_totals['total_classes'] += oop['classes_defined']
+					project_totals['total_abstract_classes'] += oop['abstract_classes']
+					project_totals['total_interfaces'] += oop['interfaces_defined']
+					project_totals['total_methods'] += oop['method_count']
+					project_totals['total_attributes'] += oop['attribute_count']
+					project_totals['total_efferent_coupling'] += oop['efferent_coupling']
+					project_totals['total_afferent_coupling'] += oop['afferent_coupling']
+					project_totals['total_instability'] += oop['instability']
+					project_totals['total_abstractness'] += oop['abstractness']
+					project_totals['total_distance_main_sequence'] += oop['distance_main_sequence']
+					
+					# Count files that have OOP constructs
+					if (oop['classes_defined'] > 0 or oop['interfaces_defined'] > 0 or 
+						oop['method_count'] > 0 or oop['attribute_count'] > 0):
+						project_totals['files_with_oop'] += 1
 					
 					project_totals['files_analyzed'] += 1
 					
@@ -2211,13 +2559,135 @@ class DataCollector:
 					'moderate_files': project_totals['files_by_maintainability']['moderate'],
 					'difficult_files': project_totals['files_by_maintainability']['difficult'],
 					'critical_files': project_totals['files_by_maintainability']['critical'],
-					'files_analyzed': files_count
+					'files_analyzed': files_count,
+					'file_details': project_totals['mi_file_details']
 				}
+				
+				# OOP Software Metrics
+				if project_totals['files_with_oop'] > 0:
+					oop_files = project_totals['files_with_oop']
+					cm['oop_metrics'] = {
+						'project_totals': {
+							'total_classes': project_totals['total_classes'],
+							'total_abstract_classes': project_totals['total_abstract_classes'],
+							'total_interfaces': project_totals['total_interfaces'],
+							'total_methods': project_totals['total_methods'],
+							'total_attributes': project_totals['total_attributes'],
+							'files_with_oop': oop_files,
+							'files_analyzed': files_count
+						},
+						'coupling_metrics': {
+							'total_efferent_coupling': project_totals['total_efferent_coupling'],
+							'total_afferent_coupling': project_totals['total_afferent_coupling'],
+							'avg_efferent_coupling': project_totals['total_efferent_coupling'] / oop_files,
+							'avg_afferent_coupling': project_totals['total_afferent_coupling'] / oop_files
+						},
+						'quality_metrics': {
+							'avg_instability': project_totals['total_instability'] / oop_files,
+							'avg_abstractness': project_totals['total_abstractness'] / oop_files,
+							'avg_distance_main_sequence': project_totals['total_distance_main_sequence'] / oop_files
+						},
+						'averages_per_oop_file': {
+							'classes_per_file': project_totals['total_classes'] / oop_files,
+							'methods_per_file': project_totals['total_methods'] / oop_files,
+							'attributes_per_file': project_totals['total_attributes'] / oop_files,
+							'abstraction_ratio': (project_totals['total_abstract_classes'] + project_totals['total_interfaces']) / max(project_totals['total_classes'] + project_totals['total_interfaces'], 1) * 100
+						}
+					}
+				else:
+					cm['oop_metrics'] = {
+						'project_totals': {
+							'total_classes': 0,
+							'total_abstract_classes': 0,
+							'total_interfaces': 0,
+							'total_methods': 0,
+							'total_attributes': 0,
+							'files_with_oop': 0,
+							'files_analyzed': files_count
+						},
+						'message': 'No OOP constructs found in analyzed files'
+					}
 				
 				print(f'    Completed comprehensive analysis of {files_count} files')
 				print(f'    Average metrics: LOC={cm["loc_metrics"]["avg_loc_phy_per_file"]:.1f}, ' +
 					  f'Complexity={cm["mccabe_metrics"]["avg_complexity_per_file"]:.1f}, ' +
 					  f'MI={cm["maintainability_metrics"]["avg_mi"]:.1f}')
+				
+				# Display OOP metrics summary
+				if 'oop_metrics' in cm and cm['oop_metrics']['project_totals']['files_with_oop'] > 0:
+					oop = cm['oop_metrics']
+					print(f'    OOP metrics: {oop["project_totals"]["files_with_oop"]} files with OOP constructs')
+					print(f'    Classes: {oop["project_totals"]["total_classes"]}, Methods: {oop["project_totals"]["total_methods"]}, ' +
+						  f'Avg Coupling: {oop["coupling_metrics"]["avg_efferent_coupling"]:.1f}')
+				else:
+					print(f'    OOP metrics: No object-oriented constructs found')
+				
+				# Print detailed MI analysis
+				mi_metrics = cm['maintainability_metrics']
+				print('\n  === Maintainability Index Analysis by Category ===')
+				print(f'    📈 Good Files (MI ≥ 85):       {mi_metrics["good_files"]:4d} files')
+				print(f'    📊 Moderate Files (65 ≤ MI < 85): {mi_metrics["moderate_files"]:4d} files') 
+				print(f'    📉 Difficult Files (0 ≤ MI < 65): {mi_metrics["difficult_files"]:4d} files')
+				print(f'    ⚠️  Critical Files (MI < 0):    {mi_metrics["critical_files"]:4d} files')
+				print(f'    📁 Total Files Analyzed:       {files_count:4d} files')
+				
+				# Show most problematic files if any exist
+				file_details = mi_metrics['file_details']
+				if file_details['critical'] or file_details['difficult']:
+					print('\n  === Files Requiring Attention ===')
+					
+					# Show critical files (MI < 0)
+					if file_details['critical']:
+						print('    🚨 Critical Files (MI < 0):')
+						critical_files = sorted(file_details['critical'], key=lambda x: x['mi_raw'])
+						for file_info in critical_files[:10]:  # Show top 10 worst
+							print(f'      {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})')
+						if len(critical_files) > 10:
+							print(f'      ... and {len(critical_files) - 10} more critical files')
+					
+					# Show worst difficult files (0 ≤ MI < 65)
+					if file_details['difficult']:
+						print('    ⚠️  Most Difficult Files (0 ≤ MI < 65):')
+						difficult_files = sorted(file_details['difficult'], key=lambda x: x['mi_raw'])
+						for file_info in difficult_files[:5]:  # Show top 5 worst
+							print(f'      {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})')
+						if len(difficult_files) > 5:
+							print(f'      ... and {len(difficult_files) - 5} more difficult files')
+				
+				# Show best maintained files if any exist
+				if file_details['good']:
+					print('\n  === Well-Maintained Files (Top 5) ===')
+					good_files = sorted(file_details['good'], key=lambda x: x['mi_raw'], reverse=True)
+					for file_info in good_files[:5]:  # Show top 5 best
+						print(f'    ✅ {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})')
+				
+				# Show extension-based MI analysis
+				print('  === Maintainability Index by File Extension ===')
+				extension_stats = {}
+				
+				# Collect stats by extension
+				for category in ['good', 'moderate', 'difficult', 'critical']:
+					for file_info in file_details[category]:
+						ext = file_info['extension']
+						if ext not in extension_stats:
+							extension_stats[ext] = {
+								'good': 0, 'moderate': 0, 'difficult': 0, 'critical': 0,
+								'total': 0, 'sum_mi': 0.0
+							}
+						extension_stats[ext][category] += 1
+						extension_stats[ext]['total'] += 1
+						extension_stats[ext]['sum_mi'] += file_info['mi_raw']
+				
+				# Display extension statistics
+				if extension_stats:
+					for ext in sorted(extension_stats.keys()):
+						stats = extension_stats[ext]
+						avg_mi = stats['sum_mi'] / stats['total'] if stats['total'] > 0 else 0.0
+						print(f'    {ext:8s}: {stats["total"]:3d} files (avg MI: {avg_mi:6.1f}) | ' +
+							  f'Good: {stats["good"]:2d}, Moderate: {stats["moderate"]:2d}, ' +
+							  f'Difficult: {stats["difficult"]:2d}, Critical: {stats["critical"]:2d}')
+				
+				print()  # Add spacing after MI analysis
 			else:
 				print('    No files could be analyzed for comprehensive metrics')
 				
@@ -2225,114 +2695,7 @@ class DataCollector:
 			if conf['debug']:
 				print(f'    Error in comprehensive metrics calculation: {e}')
 			
-	def _calculate_project_health_metrics(self):
-		"""Calculate overall project health indicators."""
-		print('  Calculating project health indicators...')
-		
-		try:
-			# Get comprehensive metrics if available
-			cm = self.project_health.get('comprehensive_metrics', {})
-			
-			# Calculate Overall Health Score (weighted average)
-			health_components = []
-			
-			# 1. Documentation Quality (25% weight)
-			doc_score = self.calculate_documentation_quality()
-			health_components.append(('documentation', doc_score, 0.25))
-			
-			# 2. Code Quality based on Maintainability Index (30% weight)
-			if cm.get('maintainability_metrics', {}).get('avg_mi', 0) > 0:
-				mi_score = min(cm['maintainability_metrics']['avg_mi'], 100)
-				# Convert MI to 0-100 scale (MI >= 85 is good)
-				code_quality_score = (mi_score / 85) * 100 if mi_score <= 85 else 100
-			else:
-				code_quality_score = 50  # Default if no data
-			health_components.append(('code_quality', code_quality_score, 0.30))
-			
-			# 3. Team Collaboration (20% weight)
-			bus_factor = self.calculate_bus_factor()
-			collaboration_score = min(bus_factor * 20, 100)  # Scale bus factor
-			health_components.append(('collaboration', collaboration_score, 0.20))
-			
-			# 4. Complexity Management (15% weight)
-			if cm.get('mccabe_metrics', {}).get('avg_complexity_per_file', 0) > 0:
-				avg_complexity = cm['mccabe_metrics']['avg_complexity_per_file']
-				# Good: <= 10, Acceptable: <= 15, Poor: > 15
-				if avg_complexity <= 10:
-					complexity_score = 100
-				elif avg_complexity <= 15:
-					complexity_score = 80 - ((avg_complexity - 10) * 8)  # Linear decrease
-				else:
-					complexity_score = max(20, 80 - ((avg_complexity - 15) * 4))  # Cap at 20
-			else:
-				complexity_score = 70  # Default
-			health_components.append(('complexity', complexity_score, 0.15))
-			
-			# 5. Code Coverage (estimated from comments) (10% weight)
-			if cm.get('loc_metrics', {}).get('avg_comment_ratio', 0) > 0:
-				comment_ratio = cm['loc_metrics']['avg_comment_ratio']
-				# Good range: 20-40%
-				if 20 <= comment_ratio <= 40:
-					coverage_score = 100
-				elif comment_ratio < 20:
-					coverage_score = (comment_ratio / 20) * 100
-				else:  # > 40%
-					coverage_score = max(60, 100 - ((comment_ratio - 40) * 2))
-			else:
-				coverage_score = 30  # Default for no comments
-			health_components.append(('coverage', coverage_score, 0.10))
-			
-			# Calculate weighted overall health score
-			total_score = sum(score * weight for _, score, weight in health_components)
-			self.project_health['overall_health_score'] = min(100, max(0, total_score))
-			
-			# Set risk level
-			if total_score >= 80:
-				self.project_health['risk_level'] = 'low'
-			elif total_score >= 60:
-				self.project_health['risk_level'] = 'medium'
-			else:
-				self.project_health['risk_level'] = 'high'
-			
-			# Set quality gate status
-			if total_score >= 85 and doc_score >= 60 and collaboration_score >= 40:
-				self.project_health['quality_gate_status'] = 'passed'
-			elif total_score >= 70:
-				self.project_health['quality_gate_status'] = 'warning'
-			else:
-				self.project_health['quality_gate_status'] = 'failed'
-			
-			# Generate actionable issues
-			self.project_health['actionable_issues'] = []
-			
-			if doc_score < 50:
-				self.project_health['actionable_issues'].append('Improve code documentation - current comment density is low')
-			
-			if bus_factor <= 2:
-				self.project_health['actionable_issues'].append('Increase team collaboration - current bus factor too low')
-			
-			if cm.get('mccabe_metrics', {}).get('avg_complexity_per_file', 0) > 15:
-				self.project_health['actionable_issues'].append('Reduce code complexity - average cyclomatic complexity is too high')
-			
-			if cm.get('maintainability_metrics', {}).get('difficult_files', 0) + cm.get('maintainability_metrics', {}).get('critical_files', 0) > 0:
-				problem_files = cm['maintainability_metrics']['difficult_files'] + cm['maintainability_metrics']['critical_files']
-				self.project_health['actionable_issues'].append(f'Refactor {problem_files} files with poor maintainability index')
-			
-			print(f'    Overall Health Score: {self.project_health["overall_health_score"]:.1f}/100')
-			print(f'    Risk Level: {self.project_health["risk_level"]}')
-			print(f'    Quality Gate: {self.project_health["quality_gate_status"]}')
-			
-			if self.project_health['actionable_issues']:
-				print(f'    Identified {len(self.project_health["actionable_issues"])} actionable issues')
-			
-		except Exception as e:
-			if conf['debug']:
-				print(f'    Error calculating project health metrics: {e}')
-			# Set default values
-			self.project_health['overall_health_score'] = 0.0
-			self.project_health['risk_level'] = 'unknown'
-			self.project_health['quality_gate_status'] = 'unknown'
-			self.project_health['actionable_issues'] = []
+
 
 class GitDataCollector(DataCollector):
 	def collect(self, dir):
@@ -2656,8 +3019,7 @@ class GitDataCollector(DataCollector):
 			self.code_analysis['total_comment_lines'] += comment_lines
 			self.code_analysis['total_blank_lines'] += blank_lines
 			
-			# Update enhanced documentation metrics
-			self.project_health['documentation_quality']['comment_lines'] += comment_lines
+
 
 		# File revision counting
 		print('Collecting file revision statistics...')
@@ -3164,21 +3526,16 @@ class GitDataCollector(DataCollector):
 			if conf['debug']:
 				print(f'Warning: Enhanced file analysis failed: {e}')
 		
-		# Calculate final project health score
+		# Calculate comprehensive software metrics
 		try:
-			health_score = self.calculate_project_health_score()
-			print(f'Project Health Score: {health_score:.1f}/100')
-			print(f'Quality Gate Status: {self.project_health["quality_gate_status"]}')
-			print(f'Risk Level: {self.project_health["risk_level"]}')
-			
-			if self.project_health['actionable_issues']:
-				print('Actionable Issues:')
-				for issue in self.project_health['actionable_issues']:
-					print(f'  - {issue}')
-		
+			if conf['verbose']:
+				print('Calculating comprehensive software metrics...')
+			self.calculate_comprehensive_metrics()
 		except Exception as e:
 			if conf['debug']:
-				print(f'Warning: Health score calculation failed: {e}')
+				print(f'Warning: Comprehensive metrics calculation failed: {e}')
+		
+
 	
 	def _analyzeCommitPatterns(self):
 		"""Analyze commit patterns to identify commit behavior (small vs large commits, frequency, etc.)"""
@@ -3610,9 +3967,7 @@ class GitDataCollector(DataCollector):
 		print('Calculating comprehensive code metrics...')
 		self._calculate_comprehensive_project_metrics()
 		
-		# Calculate project health metrics
-		print('Calculating project health metrics...')
-		self._calculate_project_health_metrics()
+
 		
 		# authors
 		# name -> {place_by_commits, commits_frac, date_first, date_last, timedelta}
@@ -4115,37 +4470,6 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<div id="project_health" class="section">')
 		f.write(html_header(2, 'Project Health Dashboard'))
 		
-		# Overall Health Score
-		health_score = data.project_health.get('overall_health_score', 0)
-		risk_level = data.project_health.get('risk_level', 'unknown')
-		quality_gate = data.project_health.get('quality_gate_status', 'unknown')
-		
-		f.write('<dl>')
-		f.write('<dt>Overall Health Score</dt><dd><strong>%.1f/100</strong></dd>' % health_score)
-		
-		# Color-code risk level
-		risk_color = {'low': 'green', 'medium': 'orange', 'high': 'red'}.get(risk_level, 'gray')
-		f.write('<dt>Risk Level</dt><dd><span style="color: %s; font-weight: bold;">%s</span></dd>' % (risk_color, risk_level.upper()))
-		
-		# Quality Gate Status
-		gate_color = {'passed': 'green', 'warning': 'orange', 'failed': 'red'}.get(quality_gate, 'gray')
-		f.write('<dt>Quality Gate</dt><dd><span style="color: %s; font-weight: bold;">%s</span></dd>' % (gate_color, quality_gate.upper()))
-		f.write('</dl>')
-		
-		# Documentation Quality Metrics
-		f.write('<h3>Documentation Quality</h3>')
-		doc_metrics = data.documentation_metrics
-		f.write('<dl>')
-		f.write('<dt>Comment Density</dt><dd>%.1f lines</dd>' % doc_metrics.get('total_comment_lines', 0))
-		f.write('<dt>Documentation Files</dt><dd>%d</dd>' % doc_metrics.get('total_documentation_files', 0))
-		f.write('<dt>Functions Documented</dt><dd>%d/%d</dd>' % (
-			doc_metrics.get('api_documented_functions', 0),
-			doc_metrics.get('total_functions', 0)
-		))
-		doc_quality_score = data.calculate_documentation_quality()
-		f.write('<dt>Documentation Score</dt><dd><strong>%.1f/100</strong></dd>' % doc_quality_score)
-		f.write('</dl>')
-		
 		# Code Quality Metrics
 		f.write('<h3>Code Quality</h3>')
 		code_metrics = data.code_quality_metrics
@@ -4270,8 +4594,149 @@ class HTMLReportCreator(ReportCreator):
 				problem_files = mi_metrics.get('difficult_files', 0) + mi_metrics.get('critical_files', 0)
 				if problem_files > 0:
 					f.write('<dt>Files Needing Attention</dt><dd><span style="color: red; font-weight: bold;">%d</span> files require refactoring</dd>' % problem_files)
+					
+					# Show detailed file information if available
+					file_details = mi_metrics.get('file_details', {})
+					if file_details:
+						f.write('<dt>Critical Files Details</dt><dd>')
+						
+						# Show critical files (MI < 0)
+						critical_files = file_details.get('critical', [])
+						if critical_files:
+							f.write('<strong>Critical Files (MI &lt; 0):</strong><br>')
+							critical_sorted = sorted(critical_files, key=lambda x: x['mi_raw'])
+							for i, file_info in enumerate(critical_sorted[:10]):  # Show top 10 worst
+								f.write(f'&nbsp;&nbsp;• {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})<br>')
+							if len(critical_sorted) > 10:
+								f.write(f'&nbsp;&nbsp;... and {len(critical_sorted) - 10} more critical files<br>')
+						
+						# Show difficult files (0 ≤ MI < 65)
+						difficult_files = file_details.get('difficult', [])
+						if difficult_files:
+							if critical_files:  # Add spacing if we already showed critical files
+								f.write('<br>')
+							f.write('<strong>Difficult Files (0 ≤ MI &lt; 65):</strong><br>')
+							difficult_sorted = sorted(difficult_files, key=lambda x: x['mi_raw'])
+							for i, file_info in enumerate(difficult_sorted[:5]):  # Show top 5 worst
+								f.write(f'&nbsp;&nbsp;• {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})<br>')
+							if len(difficult_sorted) > 5:
+								f.write(f'&nbsp;&nbsp;... and {len(difficult_sorted) - 5} more difficult files<br>')
+						
+						f.write('</dd>')
+					
+					# Show extension-based statistics
+					f.write('<dt>Maintainability by Extension</dt><dd>')
+					extension_stats = {}
+					
+					# Collect stats by extension
+					for category in ['good', 'moderate', 'difficult', 'critical']:
+						for file_info in file_details.get(category, []):
+							ext = file_info['extension']
+							if ext not in extension_stats:
+								extension_stats[ext] = {
+									'good': 0, 'moderate': 0, 'difficult': 0, 'critical': 0,
+									'total': 0, 'sum_mi': 0.0
+								}
+							extension_stats[ext][category] += 1
+							extension_stats[ext]['total'] += 1
+							extension_stats[ext]['sum_mi'] += file_info['mi_raw']
+					
+					# Display extension statistics
+					if extension_stats:
+						f.write('<table style="margin-top: 10px; border-collapse: collapse; width: 100%;">')
+						f.write('<tr style="background-color: #f0f0f0;"><th style="border: 1px solid #ccc; padding: 5px;">Extension</th><th style="border: 1px solid #ccc; padding: 5px;">Files</th><th style="border: 1px solid #ccc; padding: 5px;">Avg MI</th><th style="border: 1px solid #ccc; padding: 5px;">Good</th><th style="border: 1px solid #ccc; padding: 5px;">Moderate</th><th style="border: 1px solid #ccc; padding: 5px;">Difficult</th><th style="border: 1px solid #ccc; padding: 5px;">Critical</th></tr>')
+						for ext in sorted(extension_stats.keys()):
+							stats = extension_stats[ext]
+							avg_mi = stats['sum_mi'] / stats['total'] if stats['total'] > 0 else 0.0
+							f.write('<tr>')
+							f.write(f'<td style="border: 1px solid #ccc; padding: 5px;">{ext}</td>')
+							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{stats["total"]}</td>')
+							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{avg_mi:.1f}</td>')
+							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{stats["good"]}</td>')
+							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{stats["moderate"]}</td>')
+							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{stats["difficult"]}</td>')
+							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{stats["critical"]}</td>')
+							f.write('</tr>')
+						f.write('</table>')
+					f.write('</dd>')
 				
 				f.write('</dl>')
+			
+			# OOP Software Metrics
+			oop_metrics = cm.get('oop_metrics', {})
+			if oop_metrics and oop_metrics.get('project_totals', {}).get('files_with_oop', 0) > 0:
+				f.write('<h4>Object-Oriented Programming (OOP) Metrics</h4>')
+				
+				project_totals = oop_metrics.get('project_totals', {})
+				coupling_metrics = oop_metrics.get('coupling_metrics', {})
+				quality_metrics = oop_metrics.get('quality_metrics', {})
+				averages = oop_metrics.get('averages_per_oop_file', {})
+				
+				f.write('<dl>')
+				f.write('<dt>Files with OOP Constructs</dt><dd>%d / %d</dd>' % (
+					project_totals.get('files_with_oop', 0),
+					project_totals.get('files_analyzed', 0)
+				))
+				
+				# Class and Structure Metrics
+				f.write('<dt>Total Classes Defined</dt><dd>%d</dd>' % project_totals.get('total_classes', 0))
+				f.write('<dt>Total Abstract Classes</dt><dd>%d</dd>' % project_totals.get('total_abstract_classes', 0))
+				f.write('<dt>Total Interfaces</dt><dd>%d</dd>' % project_totals.get('total_interfaces', 0))
+				f.write('<dt>Total Methods</dt><dd>%d</dd>' % project_totals.get('total_methods', 0))
+				f.write('<dt>Total Attributes</dt><dd>%d</dd>' % project_totals.get('total_attributes', 0))
+				
+				# Coupling Metrics
+				f.write('<dt>Efferent Coupling (Ce)</dt><dd>%.1f avg</dd>' % coupling_metrics.get('avg_efferent_coupling', 0))
+				f.write('<dt>Afferent Coupling (Ca)</dt><dd>%.1f avg</dd>' % coupling_metrics.get('avg_afferent_coupling', 0))
+				
+				# Quality Metrics with recommendations
+				instability = quality_metrics.get('avg_instability', 0)
+				f.write('<dt>Instability (I)</dt><dd>%.3f</dd>' % instability)
+				
+				abstractness = quality_metrics.get('avg_abstractness', 0)
+				f.write('<dt>Abstractness (A)</dt><dd>%.3f</dd>' % abstractness)
+				
+				distance = quality_metrics.get('avg_distance_main_sequence', 0)
+				f.write('<dt>Distance from Main Sequence</dt><dd>%.3f</dd>' % distance)
+				
+				# Averages per OOP file
+				f.write('<dt>Classes per OOP File</dt><dd>%.1f</dd>' % averages.get('classes_per_file', 0))
+				f.write('<dt>Methods per OOP File</dt><dd>%.1f</dd>' % averages.get('methods_per_file', 0))
+				f.write('<dt>Attributes per OOP File</dt><dd>%.1f</dd>' % averages.get('attributes_per_file', 0))
+				f.write('<dt>Abstraction Ratio</dt><dd>%.1f%%</dd>' % averages.get('abstraction_ratio', 0))
+				
+				# OOP Quality Assessment
+				if distance <= 0.1:
+					oop_quality = 'green'
+					oop_text = 'EXCELLENT'
+				elif distance <= 0.2:
+					oop_quality = 'orange'
+					oop_text = 'GOOD'
+				else:
+					oop_quality = 'red'
+					oop_text = 'NEEDS IMPROVEMENT'
+				
+				f.write('<dt>OOP Design Quality</dt><dd><span style="color: %s; font-weight: bold;">%s</span> (Distance: %.3f, Optimal: ≤0.1)</dd>' % (oop_quality, oop_text, distance))
+				
+				# OOP Recommendations
+				recommendations = []
+				if instability > 0.8:
+					recommendations.append("High instability detected - consider reducing outgoing dependencies")
+				if abstractness < 0.1 and project_totals.get('total_classes', 0) > 10:
+					recommendations.append("Low abstractness - consider introducing interfaces/abstract classes")
+				if averages.get('methods_per_file', 0) > 20:
+					recommendations.append("High method count per file - consider breaking down large classes")
+				
+				if recommendations:
+					f.write('<dt>OOP Recommendations</dt><dd>')
+					for rec in recommendations:
+						f.write(f'• {rec}<br>')
+					f.write('</dd>')
+				
+				f.write('</dl>')
+			elif oop_metrics:
+				f.write('<h4>Object-Oriented Programming (OOP) Metrics</h4>')
+				f.write('<p><em>%s</em></p>' % oop_metrics.get('message', 'No OOP constructs analyzed'))
 		
 		# Team Collaboration Metrics  
 		f.write('<h3>Team Collaboration</h3>')
