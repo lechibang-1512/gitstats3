@@ -2027,6 +2027,9 @@ class DataCollector:
 			# Distance from Main Sequence: D = |A + I - 1|
 			metrics['distance_main_sequence'] = abs(metrics['abstractness'] + metrics['instability'] - 1.0)
 			
+			# Add overall coupling metric (sum of efferent and afferent coupling)
+			metrics['coupling'] = metrics['efferent_coupling'] + metrics['afferent_coupling']
+			
 		except Exception as e:
 			if conf['debug']:
 				print(f'Warning: OOP metrics calculation failed for {filepath}: {e}')
@@ -2042,6 +2045,7 @@ class DataCollector:
 			'abstract_classes': 0,
 			'interfaces_defined': 0,
 			'efferent_coupling': 0,
+			'afferent_coupling': 0,
 			'method_count': 0,
 			'attribute_count': 0,
 			'inheritance_depth': 0
@@ -2109,6 +2113,7 @@ class DataCollector:
 			'abstract_classes': 0,
 			'interfaces_defined': 0,
 			'efferent_coupling': 0,
+			'afferent_coupling': 0,
 			'method_count': 0,
 			'attribute_count': 0,
 			'inheritance_depth': 0
@@ -2152,6 +2157,7 @@ class DataCollector:
 			'abstract_classes': 0,
 			'interfaces_defined': 0,
 			'efferent_coupling': 0,
+			'afferent_coupling': 0,
 			'method_count': 0,
 			'attribute_count': 0,
 			'inheritance_depth': 0
@@ -2204,6 +2210,7 @@ class DataCollector:
 			'abstract_classes': 0,
 			'interfaces_defined': 0,
 			'efferent_coupling': 0,
+			'afferent_coupling': 0,
 			'method_count': 0,
 			'attribute_count': 0,
 			'inheritance_depth': 0
@@ -2260,6 +2267,7 @@ class DataCollector:
 			'abstract_classes': 0,
 			'interfaces_defined': 0,
 			'efferent_coupling': 0,
+			'afferent_coupling': 0,
 			'method_count': 0,
 			'attribute_count': 0,
 			'inheritance_depth': 0
@@ -2307,6 +2315,7 @@ class DataCollector:
 			'abstract_classes': 0,
 			'interfaces_defined': 0,
 			'efferent_coupling': 0,
+			'afferent_coupling': 0,
 			'method_count': 0,
 			'attribute_count': 0,
 			'inheritance_depth': 0
@@ -2345,6 +2354,7 @@ class DataCollector:
 			'abstract_classes': 0,
 			'interfaces_defined': 0,
 			'efferent_coupling': 0,
+			'afferent_coupling': 0,
 			'method_count': 0,
 			'attribute_count': 0,
 			'inheritance_depth': 0
