@@ -315,7 +315,8 @@ conf = {
 		'.py', '.pyi', '.pyx', '.pxd', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx',
 		'.d.ts', '.lua', '.proto', '.thrift', '.asm', '.s', '.S', '.R', '.r'
 	},
-	'filter_by_extensions': True  # Enable/disable extension filtering
+	'filter_by_extensions': True,  # Enable/disable extension filtering
+	'calculate_mi_per_repository': True  # Enable/disable MI calculation per repository
 }
 
 def getpipeoutput(cmds, quiet = False):
@@ -2374,30 +2375,495 @@ class DataCollector:
 		
 		return metrics
 	
-	def _calculate_comprehensive_project_metrics(self):
-		"""Calculate comprehensive code quality metrics for the entire project."""
-		print('  Analyzing source files for comprehensive metrics...')
+	def get_repository_files_for_mi(self, repository_path=None):
+		"""Get all files from repository that match allowed extensions for MI calculation.
 		
-		# Get all source files
+		Args:
+			repository_path: Path to repository (if None, uses current working directory)
+		
+		Returns:
+			list: List of file paths that match allowed extensions
+		"""
+		if repository_path:
+			original_cwd = os.getcwd()
+			try:
+				os.chdir(repository_path)
+			except OSError as e:
+				print(f'Warning: Could not change to repository path {repository_path}: {e}')
+				return []
+		
 		try:
 			files_output = getpipeoutput(['git ls-files'])
 			if not files_output.strip():
-				print('    No files found in repository')
-				return
+				print(f'    No files found in repository: {repository_path or os.getcwd()}')
+				return []
 			
 			source_files = []
+			print(f'  📁 Scanning repository: {repository_path or os.getcwd()}')
+			print('  🔍 Files matching allowed extensions:')
+			
 			for filepath in files_output.strip().split('\n'):
-				if filepath.strip() and should_include_file(filepath.split('/')[-1]):
-					full_path = os.path.join(os.getcwd(), filepath)
-					if os.path.exists(full_path):
-						source_files.append(filepath)
+				if filepath.strip():
+					filename = filepath.split('/')[-1]
+					if should_include_file(filename):
+						full_path = os.path.join(os.getcwd(), filepath)
+						if os.path.exists(full_path):
+							source_files.append(filepath)
+							# Output the found files to CLI as requested
+							ext = os.path.splitext(filename)[1] or 'no-ext'
+							print(f'      ✓ {filepath} ({ext})')
+			
+			print(f'  📊 Found {len(source_files)} files for MI analysis')
+			return source_files
+			
+		except Exception as e:
+			print(f'Warning: Failed to get repository files: {e}')
+			return []
+		finally:
+			if repository_path:
+				try:
+					os.chdir(original_cwd)
+				except OSError:
+					pass
+	
+	def calculate_mi_for_repository(self, repository_path=None):
+		"""Calculate MI for all matching files in a specific repository.
+		
+		Args:
+			repository_path: Path to repository (if None, uses current working directory)
+			
+		Returns:
+			dict: MI analysis results for the repository
+		"""
+		print('\n🧮 Calculating Maintainability Index (MI) for repository...')
+		
+		if repository_path:
+			original_cwd = os.getcwd()
+			try:
+				os.chdir(repository_path)
+				print(f'  📁 Repository: {repository_path}')
+			except OSError as e:
+				print(f'Error: Could not access repository {repository_path}: {e}')
+				return None
+		
+		try:
+			# Get all source files for this repository
+			source_files = self.get_repository_files_for_mi(repository_path)
 			
 			if not source_files:
-				print('    No source files found with allowed extensions')
-				return
+				print('    ⚠️  No source files found with allowed extensions')
+				return {
+					'repository_path': repository_path or os.getcwd(),
+					'files_analyzed': 0,
+					'mi_results': [],
+					'summary': 'No files found'
+				}
 			
-			print(f'    Processing {len(source_files)} source files...')
+			# Calculate MI for each file
+			mi_results = []
+			successful_calculations = 0
 			
+			print(f'\n  🔬 Calculating MI for {len(source_files)} files...')
+			
+			for i, filepath in enumerate(source_files):
+				try:
+					metrics = self.calculate_comprehensive_metrics(filepath)
+					if metrics and 'maintainability_index' in metrics:
+						mi_data = metrics['maintainability_index']
+						file_result = {
+							'filepath': filepath,
+							'extension': metrics.get('extension', ''),
+							'mi_score': mi_data['mi'],
+							'mi_raw': mi_data['mi_raw'],
+							'interpretation': mi_data['interpretation'],
+							'loc_phy': metrics['loc']['loc_phy'],
+							'complexity': metrics['mccabe']['cyclomatic_complexity']
+						}
+						mi_results.append(file_result)
+						successful_calculations += 1
+						
+						# Output MI result to CLI
+						print(f'      📄 {filepath}: MI = {mi_data["mi"]:.1f} ({mi_data["interpretation"]})')
+				
+				except Exception as e:
+					if conf['debug']:
+						print(f'      ⚠️  Failed to calculate MI for {filepath}: {e}')
+			
+			# Calculate summary statistics
+			if mi_results:
+				mi_scores = [result['mi_score'] for result in mi_results]
+				avg_mi = sum(mi_scores) / len(mi_scores)
+				
+				# Count by interpretation
+				interpretation_counts = {}
+				for result in mi_results:
+					interp = result['interpretation']
+					interpretation_counts[interp] = interpretation_counts.get(interp, 0) + 1
+				
+				print(f'\n  📊 MI Analysis Summary:')
+				print(f'      Files analyzed: {len(mi_results)}')
+				print(f'      Average MI: {avg_mi:.1f}')
+				print(f'      Distribution:')
+				for interp, count in interpretation_counts.items():
+					print(f'        - {interp}: {count} files')
+				
+				return {
+					'repository_path': repository_path or os.getcwd(),
+					'files_analyzed': len(mi_results),
+					'successful_calculations': successful_calculations,
+					'mi_results': mi_results,
+					'summary': {
+						'average_mi': avg_mi,
+						'distribution': interpretation_counts,
+						'total_files': len(source_files),
+						'calculated_files': len(mi_results)
+					}
+				}
+			else:
+				print('    ⚠️  No successful MI calculations')
+				return {
+					'repository_path': repository_path or os.getcwd(),
+					'files_analyzed': 0,
+					'mi_results': [],
+					'summary': 'No successful calculations'
+				}
+				
+		except Exception as e:
+			print(f'Error during MI calculation: {e}')
+			return None
+		finally:
+			if repository_path:
+				try:
+					os.chdir(original_cwd)
+				except OSError:
+					pass
+	
+	def calculate_mccabe_for_repository(self, repository_path=None):
+		"""Calculate McCabe complexity metrics for all files in the repository."""
+		print('🔄 Calculating McCabe Complexity for repository...')
+		print(f'  📁 Repository: {repository_path or os.getcwd()}')
+		
+		original_cwd = os.getcwd()
+		
+		try:
+			source_files = self.get_repository_files_for_mi(repository_path)
+			
+			if not source_files:
+				print('    ⚠️  No source files found for McCabe analysis')
+				return None
+			
+			print(f'  📊 Found {len(source_files)} files for McCabe analysis')
+			print(f'  🔬 Calculating complexity for {len(source_files)} files...')
+			
+			complexity_results = []
+			
+			for filepath in source_files:
+				try:
+					full_filepath = os.path.join(repository_path or os.getcwd(), filepath)
+					with open(full_filepath, 'r', encoding='utf-8', errors='ignore') as f:
+						content = f.read()
+					
+					ext = os.path.splitext(filepath)[1].lower()
+					mccabe_metrics = self._calculate_mccabe_complexity(content, ext)
+					complexity = mccabe_metrics['cyclomatic_complexity']
+					
+					# Categorize complexity
+					if complexity <= 5:
+						category = 'simple'
+					elif complexity <= 10:
+						category = 'moderate'
+					elif complexity <= 20:
+						category = 'complex'
+					else:
+						category = 'very_complex'
+					
+					result = {
+						'filepath': filepath,
+						'complexity': complexity,
+						'category': category
+					}
+					complexity_results.append(result)
+					
+					print(f'      📄 {filepath}: Complexity = {complexity} ({category})')
+					
+				except Exception as e:
+					print(f'      ❌ Error analyzing {filepath}: {e}')
+			
+			if complexity_results:
+				# Calculate summary statistics
+				complexities = [r['complexity'] for r in complexity_results]
+				avg_complexity = sum(complexities) / len(complexities)
+				max_complexity = max(complexities)
+				
+				# Count by category
+				simple_files = len([r for r in complexity_results if r['category'] == 'simple'])
+				moderate_files = len([r for r in complexity_results if r['category'] == 'moderate'])
+				complex_files = len([r for r in complexity_results if r['category'] == 'complex'])
+				very_complex_files = len([r for r in complexity_results if r['category'] == 'very_complex'])
+				
+				print(f'\n  📊 McCabe Complexity Analysis Summary:')
+				print(f'      Files analyzed: {len(complexity_results)}')
+				print(f'      Average complexity: {avg_complexity:.1f}')
+				print(f'      Maximum complexity: {max_complexity}')
+				print(f'      Distribution:')
+				print(f'        - Simple (≤5): {simple_files} files')
+				print(f'        - Moderate (6-10): {moderate_files} files') 
+				print(f'        - Complex (11-20): {complex_files} files')
+				print(f'        - Very Complex (>20): {very_complex_files} files')
+				
+				# Show all files by complexity (highest first)
+				print('\n  === Files by McCabe Complexity (Highest First) ===')
+				sorted_results = sorted(complexity_results, key=lambda x: x['complexity'], reverse=True)
+				for result in sorted_results:  # Show all files
+					if result['complexity'] > 20:
+						print(f'    🚨 {result["filepath"]} (Complexity: {result["complexity"]}) - Very Complex')
+					elif result['complexity'] > 10:
+						print(f'    ⚠️  {result["filepath"]} (Complexity: {result["complexity"]}) - Complex')
+					elif result['complexity'] > 5:
+						print(f'    � {result["filepath"]} (Complexity: {result["complexity"]}) - Moderate')
+					else:
+						print(f'    ✅ {result["filepath"]} (Complexity: {result["complexity"]}) - Simple')
+				
+				print('✓ McCabe complexity calculation completed')
+				return {
+					'repository_path': repository_path or os.getcwd(),
+					'files_analyzed': len(complexity_results),
+					'results': complexity_results,
+					'summary': {
+						'average_complexity': avg_complexity,
+						'max_complexity': max_complexity,
+						'simple_files': simple_files,
+						'moderate_files': moderate_files,
+						'complex_files': complex_files,
+						'very_complex_files': very_complex_files
+					}
+				}
+			else:
+				print('    ⚠️  No successful McCabe calculations')
+				return None
+				
+		except Exception as e:
+			print(f'Error during McCabe calculation: {e}')
+			return None
+		finally:
+			if repository_path:
+				try:
+					os.chdir(original_cwd)
+				except OSError:
+					pass
+
+	def calculate_halstead_for_repository(self, repository_path=None):
+		"""Calculate Halstead metrics for all files in the repository."""
+		print('🧮 Calculating Halstead Metrics for repository...')
+		print(f'  📁 Repository: {repository_path or os.getcwd()}')
+		
+		original_cwd = os.getcwd()
+		
+		try:
+			source_files = self.get_repository_files_for_mi(repository_path)
+			
+			if not source_files:
+				print('    ⚠️  No source files found for Halstead analysis')
+				return None
+			
+			print(f'  📊 Found {len(source_files)} files for Halstead analysis')
+			print(f'  🔬 Calculating metrics for {len(source_files)} files...')
+			
+			halstead_results = []
+			
+			for filepath in source_files:
+				try:
+					full_filepath = os.path.join(repository_path or os.getcwd(), filepath)
+					with open(full_filepath, 'r', encoding='utf-8', errors='ignore') as f:
+						content = f.read()
+					
+					ext = os.path.splitext(filepath)[1].lower()
+					halstead_metrics = self._calculate_halstead_metrics(content, ext)
+					
+					result = {
+						'filepath': filepath,
+						'volume': halstead_metrics['V'],
+						'difficulty': halstead_metrics['D'],
+						'effort': halstead_metrics['E'],
+						'bugs': halstead_metrics['B'],
+						'time': halstead_metrics['T']
+					}
+					halstead_results.append(result)
+					
+					print(f'      📄 {filepath}: Volume={halstead_metrics["V"]:.1f}, Difficulty={halstead_metrics["D"]:.1f}, Effort={halstead_metrics["E"]:.1f}')
+					
+				except Exception as e:
+					print(f'      ❌ Error analyzing {filepath}: {e}')
+			
+			if halstead_results:
+				# Calculate summary statistics
+				volumes = [r['volume'] for r in halstead_results]
+				difficulties = [r['difficulty'] for r in halstead_results]
+				efforts = [r['effort'] for r in halstead_results]
+				bugs = [r['bugs'] for r in halstead_results]
+				
+				avg_volume = sum(volumes) / len(volumes)
+				avg_difficulty = sum(difficulties) / len(difficulties)
+				avg_effort = sum(efforts) / len(efforts)
+				total_bugs = sum(bugs)
+				
+				print(f'\n  📊 Halstead Metrics Analysis Summary:')
+				print(f'      Files analyzed: {len(halstead_results)}')
+				print(f'      Average volume: {avg_volume:.1f}')
+				print(f'      Average difficulty: {avg_difficulty:.1f}')
+				print(f'      Average effort: {avg_effort:.1f}')
+				print(f'      Estimated total bugs: {total_bugs:.2f}')
+				
+				# Show all files by effort (highest first)
+				print('\n  === Files by Halstead Effort (Highest First) ===')
+				sorted_results = sorted(halstead_results, key=lambda x: x['effort'], reverse=True)
+				for result in sorted_results:  # Show all files
+					print(f'    📄 {result["filepath"]} (Effort: {result["effort"]:.1f}, Bugs: {result["bugs"]:.2f})')
+				
+				print('✓ Halstead metrics calculation completed')
+				return {
+					'repository_path': repository_path or os.getcwd(),
+					'files_analyzed': len(halstead_results),
+					'results': halstead_results,
+					'summary': {
+						'average_volume': avg_volume,
+						'average_difficulty': avg_difficulty,
+						'average_effort': avg_effort,
+						'total_estimated_bugs': total_bugs
+					}
+				}
+			else:
+				print('    ⚠️  No successful Halstead calculations')
+				return None
+				
+		except Exception as e:
+			print(f'Error during Halstead calculation: {e}')
+			return None
+		finally:
+			if repository_path:
+				try:
+					os.chdir(original_cwd)
+				except OSError:
+					pass
+
+	def calculate_oop_for_repository(self, repository_path=None):
+		"""Calculate OOP metrics for all files in the repository."""
+		print('🏗️ Calculating OOP Metrics for repository...')
+		print(f'  📁 Repository: {repository_path or os.getcwd()}')
+		
+		original_cwd = os.getcwd()
+		
+		try:
+			source_files = self.get_repository_files_for_mi(repository_path)
+			
+			if not source_files:
+				print('    ⚠️  No source files found for OOP analysis')
+				return None
+			
+			print(f'  📊 Found {len(source_files)} files for OOP analysis')
+			print(f'  🔬 Calculating metrics for {len(source_files)} files...')
+			
+			oop_results = []
+			
+			for filepath in source_files:
+				try:
+					full_filepath = os.path.join(repository_path or os.getcwd(), filepath)
+					with open(full_filepath, 'r', encoding='utf-8', errors='ignore') as f:
+						content = f.read()
+					
+					ext = os.path.splitext(filepath)[1].lower()
+					oop_metrics = self._calculate_oop_metrics(content, ext, full_filepath)
+					
+					result = {
+						'filepath': filepath,
+						'classes': oop_metrics['classes_defined'],
+						'abstract_classes': oop_metrics['abstract_classes'],
+						'interfaces': oop_metrics['interfaces_defined'],
+						'methods': oop_metrics['method_count'],
+						'attributes': oop_metrics['attribute_count'],
+						'inheritance_depth': oop_metrics['inheritance_depth'],
+						'coupling': oop_metrics['coupling']
+					}
+					oop_results.append(result)
+					
+					if oop_metrics['classes_defined'] > 0:
+						print(f'      📄 {filepath}: Classes={oop_metrics["classes_defined"]}, Methods={oop_metrics["method_count"]}, Coupling={oop_metrics["coupling"]:.1f}')
+					else:
+						print(f'      📄 {filepath}: No OOP constructs found')
+					
+				except Exception as e:
+					print(f'      ❌ Error analyzing {filepath}: {e}')
+			
+			if oop_results:
+				# Calculate summary statistics
+				total_classes = sum(r['classes'] for r in oop_results)
+				total_methods = sum(r['methods'] for r in oop_results)
+				total_attributes = sum(r['attributes'] for r in oop_results)
+				files_with_oop = len([r for r in oop_results if r['classes'] > 0])
+				
+				avg_coupling = sum(r['coupling'] for r in oop_results if r['coupling'] > 0)
+				if files_with_oop > 0:
+					avg_coupling = avg_coupling / files_with_oop
+				else:
+					avg_coupling = 0
+				
+				print(f'\n  📊 OOP Metrics Analysis Summary:')
+				print(f'      Files analyzed: {len(oop_results)}')
+				print(f'      Files with OOP constructs: {files_with_oop}')
+				print(f'      Total classes: {total_classes}')
+				print(f'      Total methods: {total_methods}')
+				print(f'      Total attributes: {total_attributes}')
+				print(f'      Average coupling: {avg_coupling:.1f}')
+				
+				# Show all files with OOP constructs by coupling (highest first)
+				if files_with_oop > 0:
+					print('\n  === Files with OOP Constructs (by Coupling) ===')
+					sorted_results = sorted([r for r in oop_results if r['coupling'] > 0], 
+											key=lambda x: x['coupling'], reverse=True)
+					for result in sorted_results:  # Show all files with OOP
+						print(f'    📄 {result["filepath"]} (Classes: {result["classes"]}, Methods: {result["methods"]}, Coupling: {result["coupling"]:.1f})')
+				
+				print('✓ OOP metrics calculation completed')
+				return {
+					'repository_path': repository_path or os.getcwd(),
+					'files_analyzed': len(oop_results),
+					'results': oop_results,
+					'summary': {
+						'total_classes': total_classes,
+						'total_methods': total_methods,
+						'total_attributes': total_attributes,
+						'files_with_oop': files_with_oop,
+						'average_coupling': avg_coupling
+					}
+				}
+			else:
+				print('    ⚠️  No successful OOP calculations')
+				return None
+				
+		except Exception as e:
+			print(f'Error during OOP calculation: {e}')
+			return None
+		finally:
+			if repository_path:
+				try:
+					os.chdir(original_cwd)
+				except OSError:
+					pass
+	
+	def _calculate_comprehensive_project_metrics(self, repository_path=None):
+		"""Calculate comprehensive code quality metrics for the entire project."""
+		print('  Analyzing source files for comprehensive metrics...')
+		
+		# Get all source files using the new method - use the target repository path
+		source_files = self.get_repository_files_for_mi(repository_path)
+		
+		if not source_files:
+			print('    No source files found with allowed extensions')
+			return
+		
+		print(f'    Processing {len(source_files)} source files...')
+		
+		try:
 			# Initialize aggregate metrics
 			project_totals = {
 				'files_analyzed': 0,
@@ -2444,7 +2910,9 @@ class DataCollector:
 					print(f'    Processed {i}/{len(source_files)} files...')
 				
 				try:
-					metrics = self.calculate_comprehensive_metrics(filepath)
+					# Use full path since we're not in the repository directory
+					full_filepath = os.path.join(repository_path, filepath)
+					metrics = self.calculate_comprehensive_metrics(full_filepath)
 					if not metrics:
 						continue
 					
@@ -2509,7 +2977,7 @@ class DataCollector:
 					if conf['debug']:
 						print(f'    Warning: Failed to analyze {filepath}: {e}')
 					continue
-			
+		
 			# Calculate averages and store results
 			if project_totals['files_analyzed'] > 0:
 				files_count = project_totals['files_analyzed']
@@ -2640,25 +3108,21 @@ class DataCollector:
 					if file_details['critical']:
 						print('    🚨 Critical Files (MI < 0):')
 						critical_files = sorted(file_details['critical'], key=lambda x: x['mi_raw'])
-						for file_info in critical_files[:10]:  # Show top 10 worst
+						for file_info in critical_files:  # Show all critical files
 							print(f'      {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})')
-						if len(critical_files) > 10:
-							print(f'      ... and {len(critical_files) - 10} more critical files')
 					
 					# Show worst difficult files (0 ≤ MI < 65)
 					if file_details['difficult']:
-						print('    ⚠️  Most Difficult Files (0 ≤ MI < 65):')
+						print('    ⚠️  Difficult Files (0 ≤ MI < 65):')
 						difficult_files = sorted(file_details['difficult'], key=lambda x: x['mi_raw'])
-						for file_info in difficult_files[:5]:  # Show top 5 worst
+						for file_info in difficult_files:  # Show all difficult files
 							print(f'      {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})')
-						if len(difficult_files) > 5:
-							print(f'      ... and {len(difficult_files) - 5} more difficult files')
 				
 				# Show best maintained files if any exist
 				if file_details['good']:
-					print('\n  === Well-Maintained Files (Top 5) ===')
+					print('\n  === Well-Maintained Files ===')
 					good_files = sorted(file_details['good'], key=lambda x: x['mi_raw'], reverse=True)
-					for file_info in good_files[:5]:  # Show top 5 best
+					for file_info in good_files:  # Show all good files
 						print(f'    ✅ {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})')
 				
 				# Show extension-based MI analysis
@@ -2700,6 +3164,9 @@ class DataCollector:
 class GitDataCollector(DataCollector):
 	def collect(self, dir):
 		DataCollector.collect(self, dir)
+		
+		# Store the repository path for later use in comprehensive metrics
+		self.repository_path = dir
 		
 		# Print information about branch scanning
 		if conf['scan_default_branch_only']:
@@ -3965,7 +4432,7 @@ class GitDataCollector(DataCollector):
 	def refine(self):
 		# Calculate comprehensive metrics for all files
 		print('Calculating comprehensive code metrics...')
-		self._calculate_comprehensive_project_metrics()
+		self._calculate_comprehensive_project_metrics(getattr(self, 'repository_path', None))
 		
 
 		
@@ -4605,10 +5072,8 @@ class HTMLReportCreator(ReportCreator):
 						if critical_files:
 							f.write('<strong>Critical Files (MI &lt; 0):</strong><br>')
 							critical_sorted = sorted(critical_files, key=lambda x: x['mi_raw'])
-							for i, file_info in enumerate(critical_sorted[:10]):  # Show top 10 worst
+							for file_info in critical_sorted:  # Show all critical files
 								f.write(f'&nbsp;&nbsp;• {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})<br>')
-							if len(critical_sorted) > 10:
-								f.write(f'&nbsp;&nbsp;... and {len(critical_sorted) - 10} more critical files<br>')
 						
 						# Show difficult files (0 ≤ MI < 65)
 						difficult_files = file_details.get('difficult', [])
@@ -4617,10 +5082,8 @@ class HTMLReportCreator(ReportCreator):
 								f.write('<br>')
 							f.write('<strong>Difficult Files (0 ≤ MI &lt; 65):</strong><br>')
 							difficult_sorted = sorted(difficult_files, key=lambda x: x['mi_raw'])
-							for i, file_info in enumerate(difficult_sorted[:5]):  # Show top 5 worst
+							for file_info in difficult_sorted:  # Show all difficult files
 								f.write(f'&nbsp;&nbsp;• {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})<br>')
-							if len(difficult_sorted) > 5:
-								f.write(f'&nbsp;&nbsp;... and {len(difficult_sorted) - 5} more difficult files<br>')
 						
 						f.write('</dd>')
 					
@@ -4992,11 +5455,9 @@ class HTMLReportCreator(ReportCreator):
 		f.write('<h3>Critical Files in Project (%d files identified)</h3>' % len(critical_files))
 		if critical_files:
 			f.write('<ul>')
-			for critical_file in critical_files[:20]:  # Show first 20
+			for critical_file in critical_files:  # Show all critical files
 				f.write('<li>%s</li>' % critical_file)
 			f.write('</ul>')
-			if len(critical_files) > 20:
-				f.write('<p>... and %d more files</p>' % (len(critical_files) - 20))
 		
 		f.write('<h3>Author Impact Analysis</h3>')
 		f.write('<table class="impact-analysis sortable" id="impact-analysis">')
@@ -6723,6 +7184,16 @@ File extension filtering options (use with -c key=value):
   filter_by_extensions=True/False      # Enable/disable file extension filtering (default: True)
   allowed_extensions=.py,.js,.java    # Comma-separated list of allowed extensions (default: see below)
 
+Maintainability Index (MI) calculation options (use with -c key=value):
+  calculate_mi_per_repository=True/False # Enable/disable per-repository MI calculation (default: True)
+  
+Note about MI Calculation:
+- When enabled, GitStats scans each repository for files matching 'allowed_extensions'
+- Calculates comprehensive metrics including Lines of Code, Halstead, and McCabe complexity
+- Computes Maintainability Index (MI) for each file and displays summary
+- Outputs found files in CLI and their MI scores for transparency
+- MI results are included in the generated HTML reports
+
 Default config values:
 %s
 
@@ -7240,6 +7711,38 @@ class GitStats:
 			print('Collecting data...')
 			data.collect(gitpath)
 
+			# Calculate MI for current repository (if enabled)
+			if conf['calculate_mi_per_repository']:
+				print('Calculating Maintainability Index (MI) for current repository...')
+				mi_results = data.calculate_mi_for_repository(gitpath)
+				if mi_results:
+					print(f'✓ MI calculation completed for {mi_results.get("files_analyzed", 0)} files')
+				else:
+					print('⚠️  MI calculation failed or no files found')
+				
+				print('')
+				mccabe_results = data.calculate_mccabe_for_repository(gitpath)
+				if mccabe_results:
+					print(f'✓ McCabe calculation completed for {mccabe_results.get("files_analyzed", 0)} files')
+				else:
+					print('⚠️  McCabe calculation failed or no files found')
+				
+				print('')
+				halstead_results = data.calculate_halstead_for_repository(gitpath)
+				if halstead_results:
+					print(f'✓ Halstead calculation completed for {halstead_results.get("files_analyzed", 0)} files')
+				else:
+					print('⚠️  Halstead calculation failed or no files found')
+				
+				print('')
+				oop_results = data.calculate_oop_for_repository(gitpath)
+				if oop_results:
+					print(f'✓ OOP calculation completed for {oop_results.get("files_analyzed", 0)} files')
+				else:
+					print('⚠️  OOP calculation failed or no files found')
+			else:
+				print('Skipping per-repository metrics calculation (disabled in configuration)')
+
 			os.chdir(prevdir)
 
 			print('Refining data...')
@@ -7456,6 +7959,55 @@ class GitStats:
 				initial_memory = self._get_memory_usage()
 				
 				data.collect(repo_path)
+
+				# Calculate comprehensive metrics for current repository (if enabled)
+				if conf['calculate_mi_per_repository']:
+					print('  Calculating Maintainability Index (MI)...')
+					mi_results = data.calculate_mi_for_repository(repo_path)
+					if mi_results:
+						files_analyzed = mi_results.get("files_analyzed", 0)
+						print(f'  ✓ MI calculation completed for {files_analyzed} files')
+						if files_analyzed > 0:
+							avg_mi = mi_results.get("summary", {}).get("average_mi", 0)
+							print(f'  📊 Average MI: {avg_mi:.1f}')
+					else:
+						print('  ⚠️  MI calculation failed or no files found')
+					
+					print('  Calculating McCabe Complexity...')
+					mccabe_results = data.calculate_mccabe_for_repository(repo_path)
+					if mccabe_results:
+						files_analyzed = mccabe_results.get("files_analyzed", 0)
+						print(f'  ✓ McCabe calculation completed for {files_analyzed} files')
+						if files_analyzed > 0:
+							avg_complexity = mccabe_results.get("summary", {}).get("average_complexity", 0)
+							print(f'  📊 Average Complexity: {avg_complexity:.1f}')
+					else:
+						print('  ⚠️  McCabe calculation failed or no files found')
+					
+					print('  Calculating Halstead Metrics...')
+					halstead_results = data.calculate_halstead_for_repository(repo_path)
+					if halstead_results:
+						files_analyzed = halstead_results.get("files_analyzed", 0)
+						print(f'  ✓ Halstead calculation completed for {files_analyzed} files')
+						if files_analyzed > 0:
+							avg_effort = halstead_results.get("summary", {}).get("average_effort", 0)
+							print(f'  📊 Average Effort: {avg_effort:.1f}')
+					else:
+						print('  ⚠️  Halstead calculation failed or no files found')
+					
+					print('  Calculating OOP Metrics...')
+					oop_results = data.calculate_oop_for_repository(repo_path)
+					if oop_results:
+						files_analyzed = oop_results.get("files_analyzed", 0)
+						print(f'  ✓ OOP calculation completed for {files_analyzed} files')
+						if files_analyzed > 0:
+							files_with_oop = oop_results.get("summary", {}).get("files_with_oop", 0)
+							print(f'  📊 Files with OOP: {files_with_oop}/{files_analyzed}')
+					else:
+						print('  ⚠️  OOP calculation failed or no files found')
+				else:
+					if conf['verbose']:
+						print('  Skipping comprehensive metrics calculation (disabled in configuration)')
 				
 				final_memory = self._get_memory_usage()
 				if conf['verbose'] and initial_memory and final_memory:
