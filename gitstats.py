@@ -2913,6 +2913,9 @@ class DataCollector:
 				'total_distance_main_sequence': 0.0,
 				'files_with_oop': 0
 			}
+			# Per-file details for Halstead and McCabe to allow per-file reporting
+			project_totals['halstead_file_details'] = []
+			project_totals['mccabe_file_details'] = []
 			
 			# Analyze each file
 			for i, filepath in enumerate(source_files):
@@ -2939,12 +2942,32 @@ class DataCollector:
 					project_totals['total_halstead_difficulty'] += halstead['D']
 					project_totals['total_halstead_effort'] += halstead['E']
 					project_totals['total_estimated_bugs'] += halstead['B']
+
+					# Store per-file Halstead details for reporting
+					project_totals['halstead_file_details'].append({
+						'filepath': filepath,
+						'V': halstead.get('V', 0.0),
+						'D': halstead.get('D', 0.0),
+						'E': halstead.get('E', 0.0),
+						'B': halstead.get('B', 0.0),
+						'N': halstead.get('N', 0),
+						'n': halstead.get('n', 0)
+					})
 					
 					# Aggregate McCabe metrics
 					mccabe = metrics['mccabe']
 					complexity = mccabe['cyclomatic_complexity']
 					project_totals['total_cyclomatic_complexity'] += complexity
 					project_totals['max_cyclomatic_complexity'] = max(project_totals['max_cyclomatic_complexity'], complexity)
+
+					# Store per-file McCabe details for reporting
+					project_totals['mccabe_file_details'].append({
+						'filepath': filepath,
+						'cyclomatic_complexity': mccabe.get('cyclomatic_complexity', 0),
+						'if_count': mccabe.get('if_count', 0),
+						'loop_count': mccabe.get('loop_count', 0),
+						'additional_decisions': mccabe.get('additional_decisions', 0)
+					})
 					
 					# Aggregate Maintainability Index (use raw values for aggregation)
 					mi = metrics['maintainability_index']
@@ -3162,6 +3185,9 @@ class DataCollector:
 							  f'Difficult: {stats["difficult"]:2d}, Critical: {stats["critical"]:2d}')
 				
 				print()  # Add spacing after MI analysis
+				# Expose per-file details to the report creator
+				cm['halstead_file_details'] = project_totals.get('halstead_file_details', [])
+				cm['mccabe_file_details'] = project_totals.get('mccabe_file_details', [])
 			else:
 				print('    No files could be analyzed for comprehensive metrics')
 				
@@ -5018,6 +5044,22 @@ class HTMLReportCreator(ReportCreator):
 					rec_text = 'NEEDS IMPROVEMENT'
 				f.write('<dt>Recommendation</dt><dd><span style="color: %s; font-weight: bold;">%s</span> (Optimal: 20-1000 per function, 100-8000 per file)</dd>' % (rec_color, rec_text))
 				f.write('</dl>')
+
+				# Per-file Halstead table
+				halstead_files = cm.get('halstead_file_details', [])
+				if halstead_files:
+					f.write('<h5>Halstead Metrics per File</h5>')
+					f.write('<table style="border-collapse: collapse; width: 100%;">')
+					f.write('<tr style="background-color: #f9f9f9;"><th style="border:1px solid #ccc;padding:4px;">File</th><th style="border:1px solid #ccc;padding:4px;">V</th><th style="border:1px solid #ccc;padding:4px;">D</th><th style="border:1px solid #ccc;padding:4px;">E</th><th style="border:1px solid #ccc;padding:4px;">B</th></tr>')
+					for hf in sorted(halstead_files, key=lambda x: x.get('E', 0), reverse=True):
+						f.write('<tr>')
+						f.write(f'<td style="border:1px solid #ccc;padding:4px;">{hf["filepath"]}</td>')
+						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{hf["V"]:.1f}</td>')
+						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{hf["D"]:.1f}</td>')
+						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{hf["E"]:.1f}</td>')
+						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{hf["B"]:.2f}</td>')
+						f.write('</tr>')
+					f.write('</table>')
 			
 			# McCabe Cyclomatic Complexity
 			mccabe_metrics = cm.get('mccabe_metrics', {})
@@ -5042,6 +5084,22 @@ class HTMLReportCreator(ReportCreator):
 					rec_text = 'NEEDS IMPROVEMENT'
 				f.write('<dt>Recommendation</dt><dd><span style="color: %s; font-weight: bold;">%s</span> (Optimal: ≤15 per function, ≤100 per file)</dd>' % (rec_color, rec_text))
 				f.write('</dl>')
+
+				# Per-file McCabe table
+				mccabe_files = cm.get('mccabe_file_details', [])
+				if mccabe_files:
+					f.write('<h5>McCabe Complexity per File</h5>')
+					f.write('<table style="border-collapse: collapse; width: 100%;">')
+					f.write('<tr style="background-color: #f9f9f9;"><th style="border:1px solid #ccc;padding:4px;">File</th><th style="border:1px solid #ccc;padding:4px;">Cyclomatic</th><th style="border:1px solid #ccc;padding:4px;">IFs</th><th style="border:1px solid #ccc;padding:4px;">Loops</th><th style="border:1px solid #ccc;padding:4px;">Add. Decisions</th></tr>')
+					for mf in sorted(mccabe_files, key=lambda x: x.get('cyclomatic_complexity', 0), reverse=True):
+						f.write('<tr>')
+						f.write(f'<td style="border:1px solid #ccc;padding:4px;">{mf["filepath"]}</td>')
+						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{mf["cyclomatic_complexity"]}</td>')
+						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{mf.get("if_count",0)}</td>')
+						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{mf.get("loop_count",0)}</td>')
+						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{mf.get("additional_decisions",0)}</td>')
+						f.write('</tr>')
+					f.write('</table>')
 			
 			# Maintainability Index
 			mi_metrics = cm.get('maintainability_metrics', {})
