@@ -34,6 +34,7 @@ WEEKDAYS = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')
 
 exectime_internal = 0.0
 exectime_external = 0.0
+exectime_lock = threading.Lock()  # Thread-safe lock for exectime_external updates
 time_start = time.time()
 
 class TableDataGenerator:
@@ -352,7 +353,8 @@ def getpipeoutput(cmds, quiet = False):
 		print('[%.5f] >> %s' % (end - start, ' | '.join(cmds)))
 	if conf['debug']:
 		print(f'DEBUG: Command output ({len(output)} bytes): {output[:200].decode("utf-8", errors="replace")}...')
-	exectime_external += (end - start)
+	with exectime_lock:
+		exectime_external += (end - start)
 	return output.decode('utf-8', errors='replace').rstrip('\n')
 
 def getpipeoutput_list(cmd_list, quiet = False):
@@ -384,26 +386,38 @@ def getpipeoutput_list(cmd_list, quiet = False):
 		print('[%.5f] >> %s' % (end - start, ' '.join(cmd_list)))
 	if conf['debug']:
 		print(f'DEBUG: Command output ({len(output)} bytes): {output[:200].decode("utf-8", errors="replace")}...')
-	exectime_external += (end - start)
+	with exectime_lock:
+		exectime_external += (end - start)
 	return output.decode('utf-8', errors='replace').rstrip('\n')
 
 def get_default_branch():
 	"""Get the default branch name from git configuration or detect it"""
 	# First try to get the default branch from git config
 	try:
-		default_branch = getpipeoutput(['git symbolic-ref refs/remotes/origin/HEAD']).strip()
+		default_branch = getpipeoutput(['git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null']).strip()
 		if default_branch:
 			# Extract branch name from refs/remotes/origin/HEAD -> refs/remotes/origin/main
-			return default_branch.replace('refs/remotes/origin/', '')
-	except:
+			branch = default_branch.replace('refs/remotes/origin/', '')
+			if branch:
+				return branch
+	except Exception:
+		pass
+	
+	# Try to get from current HEAD if in a repository
+	try:
+		current_branch = getpipeoutput(['git rev-parse --abbrev-ref HEAD 2>/dev/null']).strip()
+		if current_branch and current_branch != 'HEAD':
+			# We're on a named branch, use it
+			return current_branch
+	except Exception:
 		pass
 	
 	# Try to get from git config init.defaultBranch
 	try:
-		default_branch = getpipeoutput(['git config --get init.defaultBranch']).strip()
+		default_branch = getpipeoutput(['git config --get init.defaultBranch 2>/dev/null']).strip()
 		if default_branch:
 			return default_branch
-	except:
+	except Exception:
 		pass
 	
 	# Try common main branch names in order of preference
@@ -411,18 +425,19 @@ def get_default_branch():
 	
 	# Get all local branches
 	try:
-		branches_output = getpipeoutput(['git branch'])
-		local_branches = [line.strip().lstrip('* ') for line in branches_output.split('\n') if line.strip()]
-		
-		# Check if any of the common main branches exist
-		for candidate in main_branch_candidates:
-			if candidate in local_branches:
-				return candidate
-		
-		# If none found, use the first branch
-		if local_branches:
-			return local_branches[0]
-	except:
+		branches_output = getpipeoutput(['git branch 2>/dev/null'])
+		if branches_output:
+			local_branches = [line.strip().lstrip('* ') for line in branches_output.split('\n') if line.strip()]
+			
+			# Check if any of the common main branches exist
+			for candidate in main_branch_candidates:
+				if candidate in local_branches:
+					return candidate
+			
+			# If none found and we have branches, use the first branch
+			if local_branches:
+				return local_branches[0]
+	except Exception:
 		pass
 	
 	# Fall back to master
@@ -453,8 +468,8 @@ def getcommitrange(defaultrange = 'HEAD', end_only = False):
 	
 	return defaultrange
 
-def getkeyssortedbyvalues(dict):
-	return list(map(lambda el : el[1], sorted(map(lambda el : (el[1], el[0]), dict.items()))))
+def getkeyssortedbyvalues(d):
+	return list(map(lambda el : el[1], sorted(map(lambda el : (el[1], el[0]), d.items()))))
 
 # dict['author'] = { 'commits': 512 } - ...key(dict, 'commits')
 def getkeyssortedbyvaluekey(d, key):
@@ -504,13 +519,24 @@ def should_include_file(filename):
 	if not conf['filter_by_extensions']:
 		return True
 	
-	# Get the file extension
-	if filename.find('.') == -1 or filename.rfind('.') == 0:
-		# No extension or hidden file
+	# Handle hidden files (starting with .)
+	basename = os.path.basename(filename)
+	if basename.startswith('.') and basename != '.':
 		return False
 	
-	ext = '.' + filename[(filename.rfind('.') + 1):]
-	return ext.lower() in conf['allowed_extensions']
+	# Check if filename has an extension
+	if filename.find('.') == -1:
+		# No extension - include common extensionless files
+		extensionless_includes = ['Makefile', 'Dockerfile', 'Rakefile', 'Gemfile', 'CMakeLists']
+		return basename in extensionless_includes
+	
+	# Check multi-part extensions first (e.g., .d.ts, .spec.ts)
+	filename_lower = filename.lower()
+	for ext in conf['allowed_extensions']:
+		if filename_lower.endswith(ext):
+			return True
+	
+	return False
 
 def getnumoffilesfromrev(time_rev):
 	"""
@@ -519,24 +545,50 @@ def getnumoffilesfromrev(time_rev):
 	time, rev = time_rev
 	if conf['filter_by_extensions']:
 		# Get all files and filter by extension
-		all_files = getpipeoutput(['git ls-tree -r --name-only "%s"' % rev]).split('\n')
-		filtered_files = []
-		for file_path in all_files:
-			if file_path.strip():  # Skip empty lines
-				filename = file_path.split('/')[-1]
-				if should_include_file(filename):
-					filtered_files.append(file_path)
-		return (int(time), rev, len(filtered_files))
+		try:
+			all_files_output = getpipeoutput(['git ls-tree -r --name-only "%s"' % rev])
+			if not all_files_output:
+				return (int(time), rev, 0)
+			all_files = all_files_output.split('\n')
+			filtered_files = []
+			for file_path in all_files:
+				if file_path.strip():  # Skip empty lines
+					filename = file_path.split('/')[-1]
+					if should_include_file(filename):
+						filtered_files.append(file_path)
+			return (int(time), rev, len(filtered_files))
+		except (ValueError, IndexError) as e:
+			if conf['debug']:
+				print(f'Warning: Failed to get file count for rev {rev}: {e}')
+			return (int(time), rev, 0)
 	else:
 		# Original behavior - count all files
-		return (int(time), rev, int(getpipeoutput(['git ls-tree -r --name-only "%s"' % rev, 'wc -l']).split('\n')[0]))
+		try:
+			output = getpipeoutput(['git ls-tree -r --name-only "%s"' % rev, 'wc -l'])
+			if not output or not output.strip():
+				return (int(time), rev, 0)
+			count = int(output.split('\n')[0].strip())
+			return (int(time), rev, count)
+		except (ValueError, IndexError) as e:
+			if conf['debug']:
+				print(f'Warning: Failed to get file count for rev {rev}: {e}')
+			return (int(time), rev, 0)
 
 def getnumoflinesinblob(ext_blob):
 	"""
 	Get number of lines in blob
 	"""
 	ext, blob_id = ext_blob
-	return (ext, blob_id, int(getpipeoutput(['git cat-file blob %s' % blob_id, 'wc -l']).split()[0]))
+	try:
+		output = getpipeoutput(['git cat-file blob %s' % blob_id, 'wc -l'])
+		if not output or not output.strip():
+			return (ext, blob_id, 0)
+		count = int(output.split()[0])
+		return (ext, blob_id, count)
+	except (ValueError, IndexError) as e:
+		if conf['debug']:
+			print(f'Warning: Failed to get line count for blob {blob_id}: {e}')
+		return (ext, blob_id, 0)
 
 def analyzesloc(ext_blob):
 	"""

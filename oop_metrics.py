@@ -328,7 +328,18 @@ class OOPMetricsAnalyzer:
 		if has_abc and metrics['classes_defined'] > 0:
 			# More accurate: count classes that inherit from ABC
 			abc_classes = re.findall(r'^class\s+\w+\([^)]*ABC[^)]*\):', content, re.MULTILINE)
-			metrics['abstract_classes'] = max(len(abc_classes), 1)
+			# Also count classes with @abstractmethod decorators
+			abstractmethod_count = len(re.findall(r'@abstractmethod', content))
+			if abc_classes:
+				metrics['abstract_classes'] = len(abc_classes)
+			elif abstractmethod_count > 0:
+				# Has abstract methods but no explicit ABC inheritance detected
+				# Conservative: at least 1 abstract class
+				metrics['abstract_classes'] = 1
+			else:
+				metrics['abstract_classes'] = 0
+		else:
+			metrics['abstract_classes'] = 0
 		
 		# Count methods (def within classes)
 		method_matches = re.findall(r'^\s+def\s+(\w+)\s*\(.*\):', content, re.MULTILINE)
