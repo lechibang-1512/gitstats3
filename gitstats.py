@@ -13,6 +13,9 @@ import zlib
 from collections import defaultdict
 import threading
 
+# Import OOP Metrics Module for Distance from Main Sequence analysis
+from oop_metrics import OOPMetricsAnalyzer, format_oop_report
+
 if sys.version_info < (3, 6):
 	print("Python 3.6 or higher is required for gitstats", file=sys.stderr)
 	sys.exit(1)
@@ -626,6 +629,9 @@ class DataCollector:
 		self.stamp_created = time.time()
 		self.cache = {}
 		self.total_authors = 0
+		
+		# Initialize OOP Metrics Analyzer for Distance from Main Sequence analysis
+		self.oop_analyzer = OOPMetricsAnalyzer()
 		
 		# Core activity metrics - consolidated for memory efficiency
 		self.activity_metrics = {
@@ -1487,12 +1493,16 @@ class DataCollector:
 			maintainability_index = self._calculate_maintainability_index(loc_metrics, halstead_metrics, mccabe_metrics)
 			oop_metrics = self._calculate_oop_metrics(content, ext, filepath)
 			
+			# Calculate OOP metrics using the dedicated analyzer for Distance from Main Sequence
+			oop_distance_metrics = self.oop_analyzer.analyze_file(filepath, content, ext)
+			
 			return {
 				'loc': loc_metrics,
 				'halstead': halstead_metrics,
 				'mccabe': mccabe_metrics,
 				'maintainability_index': maintainability_index,
 				'oop': oop_metrics,
+				'oop_distance': oop_distance_metrics,  # New: Distance from Main Sequence metrics
 				'filepath': filepath,
 				'extension': ext
 			}
@@ -4944,6 +4954,155 @@ class HTMLReportCreator(ReportCreator):
 					oop_summary.get('files_with_oop', 0),
 					oop_summary.get('files_analyzed', 0)
 				))
+			
+			# OOP Metrics - Distance from Main Sequence Analysis
+			f.write('<h3>OOP Metrics - Distance from Main Sequence (D)</h3>')
+			f.write('<p style="margin: 10px 0; padding: 10px; background-color: #f0f8ff; border-left: 4px solid #2196F3;">')
+			f.write('<strong>Note:</strong> The Distance from Main Sequence (D) metric measures the balance between ')
+			f.write('abstraction and stability in object-oriented designs. ')
+			f.write('Lower values indicate better design balance.')
+			f.write('</p>')
+			
+			# Calculate afferent coupling after all files are analyzed
+			data.oop_analyzer.calculate_afferent_coupling()
+			
+			# Generate summary report
+			oop_report = data.oop_analyzer.get_summary_report()
+			
+			if oop_report and 'total_files_analyzed' in oop_report:
+				# Summary metrics
+				f.write('<h4>Overall Statistics</h4>')
+				f.write('<dl>')
+				f.write('<dt>Files Analyzed</dt><dd>%d</dd>' % oop_report['total_files_analyzed'])
+				f.write('<dt>Average Distance (D)</dt><dd><strong>%.3f</strong></dd>' % oop_report['average_distance'])
+				f.write('<dt>Min Distance</dt><dd>%.3f</dd>' % oop_report['min_distance'])
+				f.write('<dt>Max Distance</dt><dd>%.3f</dd>' % oop_report['max_distance'])
+				f.write('</dl>')
+				
+				# Zone distribution
+				f.write('<h4>Design Zone Distribution</h4>')
+				zone_dist = oop_report['zone_distribution']
+				total_files = oop_report['total_files_analyzed']
+				
+				f.write('<table style="width: 100%; border-collapse: collapse; margin: 20px 0;">')
+				f.write('<thead><tr style="background-color: #f0f0f0;">')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Zone</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px; text-align: right;">Count</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px; text-align: right;">Percentage</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Description</th>')
+				f.write('</tr></thead><tbody>')
+				
+				zone_descriptions = {
+					'main_sequence': ('✅ Main Sequence', 'Good - Well-balanced design'),
+					'near_main_sequence': ('⚡ Near Main Sequence', 'Moderate - Minor improvements possible'),
+					'zone_of_pain': ('🔴 Zone of Pain', 'Poor - Too concrete and stable (rigid)'),
+					'zone_of_uselessness': ('🟡 Zone of Uselessness', 'Poor - Too abstract and unstable (unused)'),
+					'far_from_main_sequence': ('⚠️  Far from Main Sequence', 'Poor - Needs refactoring')
+				}
+				
+				for zone, (title, description) in zone_descriptions.items():
+					count = zone_dist.get(zone, 0)
+					percentage = (count / total_files * 100) if total_files > 0 else 0
+					
+					# Color code based on zone
+					if 'main_sequence' in zone:
+						row_color = '#e8f5e9'
+					elif 'near' in zone:
+						row_color = '#fff3e0'
+					elif 'pain' in zone or 'uselessness' in zone or 'far' in zone:
+						row_color = '#ffebee'
+					else:
+						row_color = 'white'
+					
+					f.write(f'<tr style="background-color: {row_color};">')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 8px;">{title}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 8px; text-align: right;">{count}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 8px; text-align: right;">{percentage:.1f}%</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 8px;">{description}</td>')
+					f.write('</tr>')
+				
+				f.write('</tbody></table>')
+				
+				# Detailed file metrics table
+				f.write('<h4>Detailed OOP Metrics by File</h4>')
+				f.write('<p style="color: #666; font-style: italic;">Top 20 files by Distance from Main Sequence</p>')
+				
+				# Sort files by distance (descending) to show problem files first
+				sorted_files = sorted(
+					data.oop_analyzer.files.items(),
+					key=lambda x: x[1]['distance_main_sequence'],
+					reverse=True
+				)[:20]
+				
+				f.write('<table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 0.9em;">')
+				f.write('<thead><tr style="background-color: #f0f0f0;">')
+				f.write('<th style="border: 1px solid #ccc; padding: 5px; text-align: left;">File</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 5px; text-align: center;" title="Number of classes defined">Classes</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 5px; text-align: center;" title="Number of abstract classes">Abstract</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 5px; text-align: center;" title="Efferent Coupling">Ce</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 5px; text-align: center;" title="Afferent Coupling">Ca</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 5px; text-align: center;" title="Abstractness: Abstract/Total">A</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 5px; text-align: center;" title="Instability: Ce/(Ce+Ca)">I</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 5px; text-align: center;" title="Distance from Main Sequence: |A+I-1|">D</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 5px; text-align: left;">Zone</th>')
+				f.write('</tr></thead><tbody>')
+				
+				for filepath, metrics in sorted_files:
+					# Determine color based on distance
+					d_value = metrics['distance_main_sequence']
+					if d_value < 0.2:
+						d_color = 'green'
+					elif d_value < 0.4:
+						d_color = 'orange'
+					else:
+						d_color = 'red'
+					
+					zone_short = {
+						'main_sequence': '✅ Main Seq',
+						'near_main_sequence': '⚡ Near Main',
+						'zone_of_pain': '🔴 Pain',
+						'zone_of_uselessness': '🟡 Useless',
+						'far_from_main_sequence': '⚠️  Far'
+					}.get(metrics['zone'], metrics['zone'])
+					
+					f.write('<tr>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; font-family: monospace; font-size: 0.85em;">{filepath}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{metrics["classes_defined"]}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{metrics["abstract_classes"]}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{metrics["efferent_coupling"]}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{metrics["afferent_coupling"]}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{metrics["abstractness"]:.3f}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{metrics["instability"]:.3f}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center; color: {d_color}; font-weight: bold;">{d_value:.3f}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px;">{zone_short}</td>')
+					f.write('</tr>')
+				
+				f.write('</tbody></table>')
+				
+				# Add legend
+				f.write('<div style="margin: 20px 0; padding: 15px; background-color: #f9f9f9; border: 1px solid #ddd;">')
+				f.write('<strong>Legend:</strong><br><br>')
+				f.write('<strong>Metrics:</strong><br>')
+				f.write('• <strong>Ce (Efferent Coupling)</strong>: Number of classes this class depends on<br>')
+				f.write('• <strong>Ca (Afferent Coupling)</strong>: Number of classes that depend on this class<br>')
+				f.write('• <strong>A (Abstractness)</strong>: Abstract classes / Total classes (0 = fully concrete, 1 = fully abstract)<br>')
+				f.write('• <strong>I (Instability)</strong>: Ce / (Ce + Ca) (0 = stable, 1 = unstable)<br>')
+				f.write('• <strong>D (Distance)</strong>: |A + I - 1| (0 = on main sequence, 1 = maximum distance)<br><br>')
+				f.write('<strong>Design Principles:</strong><br>')
+				f.write('• <strong>Main Sequence</strong>: Ideal balance - classes should have D close to 0<br>')
+				f.write('• <strong>Zone of Pain</strong> (A→0, I→0): Concrete and stable - difficult to extend<br>')
+				f.write('• <strong>Zone of Uselessness</strong> (A→1, I→1): Abstract and unstable - unused abstractions<br>')
+				f.write('</div>')
+				
+				# Recommendations
+				recommendations = oop_report.get('recommendations', [])
+				if recommendations:
+					f.write('<h4>Recommendations</h4>')
+					f.write('<ul style="line-height: 1.8;">')
+					for rec in recommendations:
+						f.write(f'<li>{rec}</li>')
+					f.write('</ul>')
+		
 		
 		# Team Collaboration Metrics  
 		f.write('<h3>Team Collaboration</h3>')
