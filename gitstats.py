@@ -2874,20 +2874,12 @@ class DataCollector:
 		print(f'    Processing {len(source_files)} source files...')
 		
 		try:
-			# Initialize aggregate metrics
+			# Initialize storage for per-file metrics (no aggregation)
+			file_metrics_list = []
+			
+			# Initialize aggregate metrics (keeping only what's needed for summaries)
 			project_totals = {
 				'files_analyzed': 0,
-				'total_loc_phy': 0,
-				'total_loc_bl': 0, 
-				'total_loc_pro': 0,
-				'total_loc_com': 0,
-				'total_halstead_volume': 0.0,
-				'total_halstead_difficulty': 0.0,
-				'total_halstead_effort': 0.0,
-				'total_estimated_bugs': 0.0,
-				'total_cyclomatic_complexity': 0,
-				'max_cyclomatic_complexity': 0,
-				'total_maintainability_index': 0.0,
 				'files_by_maintainability': {
 					'good': 0,
 					'moderate': 0,
@@ -2900,22 +2892,8 @@ class DataCollector:
 					'difficult': [],
 					'critical': []
 				},
-				# OOP metrics totals
-				'total_classes': 0,
-				'total_abstract_classes': 0,
-				'total_interfaces': 0,
-				'total_methods': 0,
-				'total_attributes': 0,
-				'total_efferent_coupling': 0.0,
-				'total_afferent_coupling': 0.0,
-				'total_instability': 0.0,
-				'total_abstractness': 0.0,
-				'total_distance_main_sequence': 0.0,
 				'files_with_oop': 0
 			}
-			# Per-file details for Halstead and McCabe to allow per-file reporting
-			project_totals['halstead_file_details'] = []
-			project_totals['mccabe_file_details'] = []
 			
 			# Analyze each file
 			for i, filepath in enumerate(source_files):
@@ -2929,49 +2907,20 @@ class DataCollector:
 					if not metrics:
 						continue
 					
-					# Aggregate LOC metrics
-					loc = metrics['loc']
-					project_totals['total_loc_phy'] += loc['loc_phy']
-					project_totals['total_loc_bl'] += loc['loc_bl']
-					project_totals['total_loc_pro'] += loc['loc_pro']
-					project_totals['total_loc_com'] += loc['loc_com']
-					
-					# Aggregate Halstead metrics
-					halstead = metrics['halstead']
-					project_totals['total_halstead_volume'] += halstead['V']
-					project_totals['total_halstead_difficulty'] += halstead['D']
-					project_totals['total_halstead_effort'] += halstead['E']
-					project_totals['total_estimated_bugs'] += halstead['B']
-
-					# Store per-file Halstead details for reporting
-					project_totals['halstead_file_details'].append({
+					# Store complete file metrics without aggregation
+					file_metric_entry = {
 						'filepath': filepath,
-						'V': halstead.get('V', 0.0),
-						'D': halstead.get('D', 0.0),
-						'E': halstead.get('E', 0.0),
-						'B': halstead.get('B', 0.0),
-						'N': halstead.get('N', 0),
-						'n': halstead.get('n', 0)
-					})
+						'extension': metrics['extension'],
+						'loc': metrics['loc'],
+						'halstead': metrics['halstead'],
+						'mccabe': metrics['mccabe'],
+						'maintainability_index': metrics['maintainability_index'],
+						'oop': metrics['oop']
+					}
+					file_metrics_list.append(file_metric_entry)
 					
-					# Aggregate McCabe metrics
-					mccabe = metrics['mccabe']
-					complexity = mccabe['cyclomatic_complexity']
-					project_totals['total_cyclomatic_complexity'] += complexity
-					project_totals['max_cyclomatic_complexity'] = max(project_totals['max_cyclomatic_complexity'], complexity)
-
-					# Store per-file McCabe details for reporting
-					project_totals['mccabe_file_details'].append({
-						'filepath': filepath,
-						'cyclomatic_complexity': mccabe.get('cyclomatic_complexity', 0),
-						'if_count': mccabe.get('if_count', 0),
-						'loop_count': mccabe.get('loop_count', 0),
-						'additional_decisions': mccabe.get('additional_decisions', 0)
-					})
-					
-					# Aggregate Maintainability Index (use raw values for aggregation)
+					# Only track maintainability categories for summaries
 					mi = metrics['maintainability_index']
-					project_totals['total_maintainability_index'] += mi['mi_raw']
 					mi_category = mi['interpretation']
 					project_totals['files_by_maintainability'][mi_category] += 1
 					
@@ -2986,20 +2935,8 @@ class DataCollector:
 					}
 					project_totals['mi_file_details'][mi_category].append(file_info)
 					
-					# Aggregate OOP metrics
-					oop = metrics['oop']
-					project_totals['total_classes'] += oop['classes_defined']
-					project_totals['total_abstract_classes'] += oop['abstract_classes']
-					project_totals['total_interfaces'] += oop['interfaces_defined']
-					project_totals['total_methods'] += oop['method_count']
-					project_totals['total_attributes'] += oop['attribute_count']
-					project_totals['total_efferent_coupling'] += oop['efferent_coupling']
-					project_totals['total_afferent_coupling'] += oop['afferent_coupling']
-					project_totals['total_instability'] += oop['instability']
-					project_totals['total_abstractness'] += oop['abstractness']
-					project_totals['total_distance_main_sequence'] += oop['distance_main_sequence']
-					
 					# Count files that have OOP constructs
+					oop = metrics['oop']
 					if (oop['classes_defined'] > 0 or oop['interfaces_defined'] > 0 or 
 						oop['method_count'] > 0 or oop['attribute_count'] > 0):
 						project_totals['files_with_oop'] += 1
@@ -3021,41 +2958,12 @@ class DataCollector:
 				
 				cm = self.project_health['comprehensive_metrics']
 				
-				# LOC metrics with averages
-				cm['loc_metrics'] = {
-					'total_loc_phy': project_totals['total_loc_phy'],
-					'total_loc_bl': project_totals['total_loc_bl'],
-					'total_loc_pro': project_totals['total_loc_pro'],
-					'total_loc_com': project_totals['total_loc_com'],
-					'avg_loc_phy_per_file': project_totals['total_loc_phy'] / files_count,
-					'avg_comment_ratio': (project_totals['total_loc_com'] / max(project_totals['total_loc_phy'], 1)) * 100,
-					'files_analyzed': files_count
-				}
+				# Store individual file metrics (no aggregation)
+				cm['file_metrics'] = file_metrics_list
+				cm['files_analyzed'] = files_count
 				
-				# Halstead metrics with averages  
-				cm['halstead_metrics'] = {
-					'total_volume': project_totals['total_halstead_volume'],
-					'total_difficulty': project_totals['total_halstead_difficulty'], 
-					'total_effort': project_totals['total_halstead_effort'],
-					'total_estimated_bugs': project_totals['total_estimated_bugs'],
-					'avg_volume_per_file': project_totals['total_halstead_volume'] / files_count,
-					'avg_difficulty_per_file': project_totals['total_halstead_difficulty'] / files_count,
-					'avg_effort_per_file': project_totals['total_halstead_effort'] / files_count,
-					'files_analyzed': files_count
-				}
-				
-				# McCabe metrics with averages
-				cm['mccabe_metrics'] = {
-					'total_complexity': project_totals['total_cyclomatic_complexity'],
-					'max_complexity': project_totals['max_cyclomatic_complexity'],
-					'avg_complexity_per_file': project_totals['total_cyclomatic_complexity'] / files_count,
-					'files_analyzed': files_count
-				}
-				
-				# Maintainability Index metrics
-				cm['maintainability_metrics'] = {
-					'total_mi': project_totals['total_maintainability_index'],
-					'avg_mi': project_totals['total_maintainability_index'] / files_count,
+				# Store only maintainability categories for summary
+				cm['maintainability_summary'] = {
 					'good_files': project_totals['files_by_maintainability']['good'],
 					'moderate_files': project_totals['files_by_maintainability']['moderate'],
 					'difficult_files': project_totals['files_by_maintainability']['difficult'],
@@ -3064,76 +2972,26 @@ class DataCollector:
 					'file_details': project_totals['mi_file_details']
 				}
 				
-				# OOP Software Metrics
-				if project_totals['files_with_oop'] > 0:
-					oop_files = project_totals['files_with_oop']
-					cm['oop_metrics'] = {
-						'project_totals': {
-							'total_classes': project_totals['total_classes'],
-							'total_abstract_classes': project_totals['total_abstract_classes'],
-							'total_interfaces': project_totals['total_interfaces'],
-							'total_methods': project_totals['total_methods'],
-							'total_attributes': project_totals['total_attributes'],
-							'files_with_oop': oop_files,
-							'files_analyzed': files_count
-						},
-						'coupling_metrics': {
-							'total_efferent_coupling': project_totals['total_efferent_coupling'],
-							'total_afferent_coupling': project_totals['total_afferent_coupling'],
-							'avg_efferent_coupling': project_totals['total_efferent_coupling'] / oop_files,
-							'avg_afferent_coupling': project_totals['total_afferent_coupling'] / oop_files
-						},
-						'quality_metrics': {
-							'avg_instability': project_totals['total_instability'] / oop_files,
-							'avg_abstractness': project_totals['total_abstractness'] / oop_files,
-							'avg_distance_main_sequence': project_totals['total_distance_main_sequence'] / oop_files
-						},
-						'averages_per_oop_file': {
-							'classes_per_file': project_totals['total_classes'] / oop_files,
-							'methods_per_file': project_totals['total_methods'] / oop_files,
-							'attributes_per_file': project_totals['total_attributes'] / oop_files,
-							'abstraction_ratio': (project_totals['total_abstract_classes'] + project_totals['total_interfaces']) / max(project_totals['total_classes'] + project_totals['total_interfaces'], 1) * 100
-						}
-					}
-				else:
-					cm['oop_metrics'] = {
-						'project_totals': {
-							'total_classes': 0,
-							'total_abstract_classes': 0,
-							'total_interfaces': 0,
-							'total_methods': 0,
-							'total_attributes': 0,
-							'files_with_oop': 0,
-							'files_analyzed': files_count
-						},
-						'message': 'No OOP constructs found in analyzed files'
-					}
+				# Store only OOP file count summary
+				cm['oop_summary'] = {
+					'files_with_oop': project_totals['files_with_oop'],
+					'files_analyzed': files_count
+				}
 				
 				print(f'    Completed comprehensive analysis of {files_count} files')
-				print(f'    Average metrics: LOC={cm["loc_metrics"]["avg_loc_phy_per_file"]:.1f}, ' +
-					  f'Complexity={cm["mccabe_metrics"]["avg_complexity_per_file"]:.1f}, ' +
-					  f'MI={cm["maintainability_metrics"]["avg_mi"]:.1f}')
-				
-				# Display OOP metrics summary
-				if 'oop_metrics' in cm and cm['oop_metrics']['project_totals']['files_with_oop'] > 0:
-					oop = cm['oop_metrics']
-					print(f'    OOP metrics: {oop["project_totals"]["files_with_oop"]} files with OOP constructs')
-					print(f'    Classes: {oop["project_totals"]["total_classes"]}, Methods: {oop["project_totals"]["total_methods"]}, ' +
-						  f'Avg Coupling: {oop["coupling_metrics"]["avg_efferent_coupling"]:.1f}')
-				else:
-					print(f'    OOP metrics: No object-oriented constructs found')
+				print(f'    Stored individual file metrics (no aggregation)')
 				
 				# Print detailed MI analysis
-				mi_metrics = cm['maintainability_metrics']
+				mi_summary = cm['maintainability_summary']
 				print('\n  === Maintainability Index Analysis by Category ===')
-				print(f'    📈 Good Files (MI ≥ 85):       {mi_metrics["good_files"]:4d} files')
-				print(f'    📊 Moderate Files (65 ≤ MI < 85): {mi_metrics["moderate_files"]:4d} files') 
-				print(f'    📉 Difficult Files (0 ≤ MI < 65): {mi_metrics["difficult_files"]:4d} files')
-				print(f'    ⚠️  Critical Files (MI < 0):    {mi_metrics["critical_files"]:4d} files')
+				print(f'    📈 Good Files (MI ≥ 85):       {mi_summary["good_files"]:4d} files')
+				print(f'    📊 Moderate Files (65 ≤ MI < 85): {mi_summary["moderate_files"]:4d} files') 
+				print(f'    📉 Difficult Files (0 ≤ MI < 65): {mi_summary["difficult_files"]:4d} files')
+				print(f'    ⚠️  Critical Files (MI < 0):    {mi_summary["critical_files"]:4d} files')
 				print(f'    📁 Total Files Analyzed:       {files_count:4d} files')
 				
 				# Show most problematic files if any exist
-				file_details = mi_metrics['file_details']
+				file_details = mi_summary['file_details']
 				if file_details['critical'] or file_details['difficult']:
 					print('\n  === Files Requiring Attention ===')
 					
@@ -3185,9 +3043,6 @@ class DataCollector:
 							  f'Difficult: {stats["difficult"]:2d}, Critical: {stats["critical"]:2d}')
 				
 				print()  # Add spacing after MI analysis
-				# Expose per-file details to the report creator
-				cm['halstead_file_details'] = project_totals.get('halstead_file_details', [])
-				cm['mccabe_file_details'] = project_totals.get('mccabe_file_details', [])
 			else:
 				print('    No files could be analyzed for comprehensive metrics')
 				
@@ -4990,284 +4845,105 @@ class HTMLReportCreator(ReportCreator):
 		# Comprehensive Code Metrics Section
 		cm = data.project_health.get('comprehensive_metrics', {})
 		if cm:
-			f.write('<h3>Comprehensive Code Metrics (College Project Standard)</h3>')
+			f.write('<h3>Comprehensive Code Metrics Per File</h3>')
 			
-			# LOC Metrics
-			loc_metrics = cm.get('loc_metrics', {})
-			if loc_metrics:
-				f.write('<h4>Lines-of-Code Metrics</h4>')
-				f.write('<dl>')
-				f.write('<dt>LOCphy (Physical Lines)</dt><dd>%d</dd>' % loc_metrics.get('total_loc_phy', 0))
-				f.write('<dt>LOCbl (Blank Lines)</dt><dd>%d</dd>' % loc_metrics.get('total_loc_bl', 0))
-				f.write('<dt>LOCpro (Program Lines)</dt><dd>%d</dd>' % loc_metrics.get('total_loc_pro', 0))
-				f.write('<dt>LOCcom (Comment Lines)</dt><dd>%d</dd>' % loc_metrics.get('total_loc_com', 0))
-				f.write('<dt>Average LOC per File</dt><dd>%.1f</dd>' % loc_metrics.get('avg_loc_phy_per_file', 0))
-				f.write('<dt>Comment Density</dt><dd>%.1f%%</dd>' % loc_metrics.get('avg_comment_ratio', 0))
+			# Get file metrics list
+			file_metrics_list = cm.get('file_metrics', [])
+			
+			if file_metrics_list:
+				f.write('<p><strong>Individual file metrics (no aggregation/averaging):</strong></p>')
 				
-				# Recommendation check
-				comment_ratio = loc_metrics.get('avg_comment_ratio', 0)
-				if 30 <= comment_ratio <= 75:
-					rec_color = 'green'
-					rec_text = 'GOOD'
-				elif 20 <= comment_ratio < 30 or 75 < comment_ratio <= 90:
-					rec_color = 'orange' 
-					rec_text = 'ACCEPTABLE'
-				else:
-					rec_color = 'red'
-					rec_text = 'NEEDS IMPROVEMENT'
-				f.write('<dt>Recommendation</dt><dd><span style="color: %s; font-weight: bold;">%s</span> (Optimal: 30-75%%)</dd>' % (rec_color, rec_text))
+				# Create comprehensive table with all metrics
+				f.write('<table class="file-metrics sortable" id="file-metrics" style="width: 100%; border-collapse: collapse; margin: 20px 0;">')
+				f.write('<thead><tr style="background-color: #f0f0f0;">')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px; text-align: left;">File Path</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px;">LOCphy</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px;">LOCpro</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px;">LOCcom</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px;">Comment %</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px;">Halstead V</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px;">Halstead D</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px;">Halstead E</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px;">Est. Bugs</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px;">McCabe v(G)</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px;">MI</th>')
+				f.write('<th style="border: 1px solid #ccc; padding: 8px;">MI Status</th>')
+				f.write('</tr></thead><tbody>')
+				
+				# Sort files by path for consistent display
+				sorted_files = sorted(file_metrics_list, key=lambda x: x['filepath'])
+				
+				for file_metric in sorted_files:
+					filepath = file_metric['filepath']
+					loc = file_metric['loc']
+					halstead = file_metric['halstead']
+					mccabe = file_metric['mccabe']
+					mi = file_metric['maintainability_index']
+					
+					# Determine MI color
+					mi_value = mi['mi_raw']
+					if mi_value >= 85:
+						mi_color = 'green'
+						mi_status = 'Good'
+					elif mi_value >= 65:
+						mi_color = 'orange'
+						mi_status = 'Moderate'
+					elif mi_value >= 0:
+						mi_color = 'red'
+						mi_status = 'Difficult'
+					else:
+						mi_color = 'darkred'
+						mi_status = 'Critical'
+					
+					f.write('<tr>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; font-family: monospace; font-size: 0.9em;">{filepath}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{loc["loc_phy"]}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{loc["loc_pro"]}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{loc["loc_com"]}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{loc["comment_ratio"]:.1f}%</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{halstead["V"]:.1f}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{halstead["D"]:.1f}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{halstead["E"]:.1f}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{halstead["B"]:.2f}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{mccabe["cyclomatic_complexity"]}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{mi_value:.1f}</td>')
+					f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center; color: {mi_color}; font-weight: bold;">{mi_status}</td>')
+					f.write('</tr>')
+				
+				f.write('</tbody></table>')
+				
+				# Add legend
+				f.write('<div style="margin: 20px 0; padding: 10px; background-color: #f9f9f9; border: 1px solid #ddd;">')
+				f.write('<strong>Legend:</strong><br>')
+				f.write('• <strong>LOCphy</strong>: Physical lines of code<br>')
+				f.write('• <strong>LOCpro</strong>: Program lines (excluding comments and blanks)<br>')
+				f.write('• <strong>LOCcom</strong>: Comment lines<br>')
+				f.write('• <strong>Halstead V</strong>: Program Volume<br>')
+				f.write('• <strong>Halstead D</strong>: Difficulty<br>')
+				f.write('• <strong>Halstead E</strong>: Effort<br>')
+				f.write('• <strong>McCabe v(G)</strong>: Cyclomatic Complexity<br>')
+				f.write('• <strong>MI</strong>: Maintainability Index (≥85 Good, 65-84 Moderate, 0-64 Difficult, <0 Critical)<br>')
+				f.write('</div>')
+			
+			# Maintainability Summary (keep this for quick overview)
+			mi_summary = cm.get('maintainability_summary', {})
+			if mi_summary:
+				f.write('<h4>Maintainability Index Summary</h4>')
+				f.write('<dl>')
+				f.write('<dt>Good Files (MI ≥ 85)</dt><dd>%d</dd>' % mi_summary.get('good_files', 0))
+				f.write('<dt>Moderate Files (65 ≤ MI < 85)</dt><dd>%d</dd>' % mi_summary.get('moderate_files', 0))
+				f.write('<dt>Difficult Files (0 ≤ MI < 65)</dt><dd>%d</dd>' % mi_summary.get('difficult_files', 0))
+				f.write('<dt>Critical Files (MI < 0)</dt><dd>%d</dd>' % mi_summary.get('critical_files', 0))
 				f.write('</dl>')
 			
-			# Halstead Metrics
-			halstead_metrics = cm.get('halstead_metrics', {})
-			if halstead_metrics:
-				f.write('<h4>Halstead Complexity Metrics</h4>')
-				f.write('<dl>')
-				f.write('<dt>Total Program Volume (V)</dt><dd>%.1f</dd>' % halstead_metrics.get('total_volume', 0))
-				f.write('<dt>Average Volume per File</dt><dd>%.1f</dd>' % halstead_metrics.get('avg_volume_per_file', 0))
-				f.write('<dt>Total Difficulty (D)</dt><dd>%.1f</dd>' % halstead_metrics.get('total_difficulty', 0))
-				f.write('<dt>Average Difficulty per File</dt><dd>%.1f</dd>' % halstead_metrics.get('avg_difficulty_per_file', 0))
-				f.write('<dt>Total Effort (E)</dt><dd>%.1f</dd>' % halstead_metrics.get('total_effort', 0))
-				f.write('<dt>Average Effort per File</dt><dd>%.1f</dd>' % halstead_metrics.get('avg_effort_per_file', 0))
-				f.write('<dt>Estimated Bugs</dt><dd>%.2f</dd>' % halstead_metrics.get('total_estimated_bugs', 0))
-				
-				# Recommendation check
-				avg_volume = halstead_metrics.get('avg_volume_per_file', 0)
-				if 20 <= avg_volume <= 1000:
-					rec_color = 'green'
-					rec_text = 'GOOD'
-				elif 1000 < avg_volume <= 1500:
-					rec_color = 'orange'
-					rec_text = 'ACCEPTABLE'
-				else:
-					rec_color = 'red'
-					rec_text = 'NEEDS IMPROVEMENT'
-				f.write('<dt>Recommendation</dt><dd><span style="color: %s; font-weight: bold;">%s</span> (Optimal: 20-1000 per function, 100-8000 per file)</dd>' % (rec_color, rec_text))
-				f.write('</dl>')
-
-				# Per-file Halstead table
-				halstead_files = cm.get('halstead_file_details', [])
-				if halstead_files:
-					f.write('<h5>Halstead Metrics per File</h5>')
-					f.write('<table style="border-collapse: collapse; width: 100%;">')
-					f.write('<tr style="background-color: #f9f9f9;"><th style="border:1px solid #ccc;padding:4px;">File</th><th style="border:1px solid #ccc;padding:4px;">V</th><th style="border:1px solid #ccc;padding:4px;">D</th><th style="border:1px solid #ccc;padding:4px;">E</th><th style="border:1px solid #ccc;padding:4px;">B</th></tr>')
-					for hf in sorted(halstead_files, key=lambda x: x.get('E', 0), reverse=True):
-						f.write('<tr>')
-						f.write(f'<td style="border:1px solid #ccc;padding:4px;">{hf["filepath"]}</td>')
-						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{hf["V"]:.1f}</td>')
-						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{hf["D"]:.1f}</td>')
-						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{hf["E"]:.1f}</td>')
-						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{hf["B"]:.2f}</td>')
-						f.write('</tr>')
-					f.write('</table>')
-			
-			# McCabe Cyclomatic Complexity
-			mccabe_metrics = cm.get('mccabe_metrics', {})
-			if mccabe_metrics:
-				f.write('<h4>McCabe Cyclomatic Complexity</h4>')
-				f.write('<dl>')
-				f.write('<dt>Total Complexity (v(G))</dt><dd>%d</dd>' % mccabe_metrics.get('total_complexity', 0))
-				f.write('<dt>Maximum Complexity</dt><dd>%d</dd>' % mccabe_metrics.get('max_complexity', 0))
-				f.write('<dt>Average Complexity per File</dt><dd>%.1f</dd>' % mccabe_metrics.get('avg_complexity_per_file', 0))
-				
-				# Recommendation check
-				avg_complexity = mccabe_metrics.get('avg_complexity_per_file', 0)
-				max_complexity = mccabe_metrics.get('max_complexity', 0)
-				if avg_complexity <= 15 and max_complexity <= 20:
-					rec_color = 'green'
-					rec_text = 'GOOD'
-				elif avg_complexity <= 20 or max_complexity <= 30:
-					rec_color = 'orange'
-					rec_text = 'ACCEPTABLE'
-				else:
-					rec_color = 'red'
-					rec_text = 'NEEDS IMPROVEMENT'
-				f.write('<dt>Recommendation</dt><dd><span style="color: %s; font-weight: bold;">%s</span> (Optimal: ≤15 per function, ≤100 per file)</dd>' % (rec_color, rec_text))
-				f.write('</dl>')
-
-				# Per-file McCabe table
-				mccabe_files = cm.get('mccabe_file_details', [])
-				if mccabe_files:
-					f.write('<h5>McCabe Complexity per File</h5>')
-					f.write('<table style="border-collapse: collapse; width: 100%;">')
-					f.write('<tr style="background-color: #f9f9f9;"><th style="border:1px solid #ccc;padding:4px;">File</th><th style="border:1px solid #ccc;padding:4px;">Cyclomatic</th><th style="border:1px solid #ccc;padding:4px;">IFs</th><th style="border:1px solid #ccc;padding:4px;">Loops</th><th style="border:1px solid #ccc;padding:4px;">Add. Decisions</th></tr>')
-					for mf in sorted(mccabe_files, key=lambda x: x.get('cyclomatic_complexity', 0), reverse=True):
-						f.write('<tr>')
-						f.write(f'<td style="border:1px solid #ccc;padding:4px;">{mf["filepath"]}</td>')
-						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{mf["cyclomatic_complexity"]}</td>')
-						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{mf.get("if_count",0)}</td>')
-						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{mf.get("loop_count",0)}</td>')
-						f.write(f'<td style="border:1px solid #ccc;padding:4px;text-align:right;">{mf.get("additional_decisions",0)}</td>')
-						f.write('</tr>')
-					f.write('</table>')
-			
-			# Maintainability Index
-			mi_metrics = cm.get('maintainability_metrics', {})
-			if mi_metrics:
-				f.write('<h4>Maintainability Index (MI)</h4>')
-				f.write('<dl>')
-				f.write('<dt>Average MI</dt><dd>%.1f</dd>' % mi_metrics.get('avg_mi', 0))
-				f.write('<dt>Good Files (MI ≥ 85)</dt><dd>%d</dd>' % mi_metrics.get('good_files', 0))
-				f.write('<dt>Moderate Files (65 ≤ MI < 85)</dt><dd>%d</dd>' % mi_metrics.get('moderate_files', 0))
-				f.write('<dt>Difficult Files (0 ≤ MI < 65)</dt><dd>%d</dd>' % mi_metrics.get('difficult_files', 0))
-				f.write('<dt>Critical Files (MI < 0)</dt><dd>%d</dd>' % mi_metrics.get('critical_files', 0))
-				
-				# Recommendation check
-				avg_mi = mi_metrics.get('avg_mi', 0)
-				if avg_mi >= 85:
-					rec_color = 'green'
-					rec_text = 'GOOD'
-				elif avg_mi >= 65:
-					rec_color = 'orange'
-					rec_text = 'MODERATE'
-				else:
-					rec_color = 'red'
-					rec_text = 'DIFFICULT TO MAINTAIN'
-				f.write('<dt>Overall Assessment</dt><dd><span style="color: %s; font-weight: bold;">%s</span></dd>' % (rec_color, rec_text))
-				
-				# Files that need attention
-				problem_files = mi_metrics.get('difficult_files', 0) + mi_metrics.get('critical_files', 0)
-				if problem_files > 0:
-					f.write('<dt>Files Needing Attention</dt><dd><span style="color: red; font-weight: bold;">%d</span> files require refactoring</dd>' % problem_files)
-					
-					# Show detailed file information if available
-					file_details = mi_metrics.get('file_details', {})
-					if file_details:
-						f.write('<dt>Critical Files Details</dt><dd>')
-						
-						# Show critical files (MI < 0)
-						critical_files = file_details.get('critical', [])
-						if critical_files:
-							f.write('<strong>Critical Files (MI &lt; 0):</strong><br>')
-							critical_sorted = sorted(critical_files, key=lambda x: x['mi_raw'])
-							for file_info in critical_sorted:  # Show all critical files
-								f.write(f'&nbsp;&nbsp;• {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})<br>')
-						
-						# Show difficult files (0 ≤ MI < 65)
-						difficult_files = file_details.get('difficult', [])
-						if difficult_files:
-							if critical_files:  # Add spacing if we already showed critical files
-								f.write('<br>')
-							f.write('<strong>Difficult Files (0 ≤ MI &lt; 65):</strong><br>')
-							difficult_sorted = sorted(difficult_files, key=lambda x: x['mi_raw'])
-							for file_info in difficult_sorted:  # Show all difficult files
-								f.write(f'&nbsp;&nbsp;• {file_info["filepath"]} (MI: {file_info["mi_raw"]:.1f}, LOC: {file_info["loc"]}, Complexity: {file_info["complexity"]})<br>')
-						
-						f.write('</dd>')
-					
-					# Show extension-based statistics
-					f.write('<dt>Maintainability by Extension</dt><dd>')
-					extension_stats = {}
-					
-					# Collect stats by extension
-					for category in ['good', 'moderate', 'difficult', 'critical']:
-						for file_info in file_details.get(category, []):
-							ext = file_info['extension']
-							if ext not in extension_stats:
-								extension_stats[ext] = {
-									'good': 0, 'moderate': 0, 'difficult': 0, 'critical': 0,
-									'total': 0, 'sum_mi': 0.0
-								}
-							extension_stats[ext][category] += 1
-							extension_stats[ext]['total'] += 1
-							extension_stats[ext]['sum_mi'] += file_info['mi_raw']
-					
-					# Display extension statistics
-					if extension_stats:
-						f.write('<table style="margin-top: 10px; border-collapse: collapse; width: 100%;">')
-						f.write('<tr style="background-color: #f0f0f0;"><th style="border: 1px solid #ccc; padding: 5px;">Extension</th><th style="border: 1px solid #ccc; padding: 5px;">Files</th><th style="border: 1px solid #ccc; padding: 5px;">Avg MI</th><th style="border: 1px solid #ccc; padding: 5px;">Good</th><th style="border: 1px solid #ccc; padding: 5px;">Moderate</th><th style="border: 1px solid #ccc; padding: 5px;">Difficult</th><th style="border: 1px solid #ccc; padding: 5px;">Critical</th></tr>')
-						for ext in sorted(extension_stats.keys()):
-							stats = extension_stats[ext]
-							avg_mi = stats['sum_mi'] / stats['total'] if stats['total'] > 0 else 0.0
-							f.write('<tr>')
-							f.write(f'<td style="border: 1px solid #ccc; padding: 5px;">{ext}</td>')
-							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{stats["total"]}</td>')
-							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{avg_mi:.1f}</td>')
-							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{stats["good"]}</td>')
-							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{stats["moderate"]}</td>')
-							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{stats["difficult"]}</td>')
-							f.write(f'<td style="border: 1px solid #ccc; padding: 5px; text-align: center;">{stats["critical"]}</td>')
-							f.write('</tr>')
-						f.write('</table>')
-					f.write('</dd>')
-				
-				f.write('</dl>')
-			
-			# OOP Software Metrics
-			oop_metrics = cm.get('oop_metrics', {})
-			if oop_metrics and oop_metrics.get('project_totals', {}).get('files_with_oop', 0) > 0:
-				f.write('<h4>Object-Oriented Programming (OOP) Metrics</h4>')
-				
-				project_totals = oop_metrics.get('project_totals', {})
-				coupling_metrics = oop_metrics.get('coupling_metrics', {})
-				quality_metrics = oop_metrics.get('quality_metrics', {})
-				averages = oop_metrics.get('averages_per_oop_file', {})
-				
-				f.write('<dl>')
-				f.write('<dt>Files with OOP Constructs</dt><dd>%d / %d</dd>' % (
-					project_totals.get('files_with_oop', 0),
-					project_totals.get('files_analyzed', 0)
+			# OOP Summary (just count, no averages)
+			oop_summary = cm.get('oop_summary', {})
+			if oop_summary and oop_summary.get('files_with_oop', 0) > 0:
+				f.write('<h4>Object-Oriented Programming Summary</h4>')
+				f.write('<p>Files with OOP constructs: %d / %d</p>' % (
+					oop_summary.get('files_with_oop', 0),
+					oop_summary.get('files_analyzed', 0)
 				))
-				
-				# Class and Structure Metrics
-				f.write('<dt>Total Classes Defined</dt><dd>%d</dd>' % project_totals.get('total_classes', 0))
-				f.write('<dt>Total Abstract Classes</dt><dd>%d</dd>' % project_totals.get('total_abstract_classes', 0))
-				f.write('<dt>Total Interfaces</dt><dd>%d</dd>' % project_totals.get('total_interfaces', 0))
-				f.write('<dt>Total Methods</dt><dd>%d</dd>' % project_totals.get('total_methods', 0))
-				f.write('<dt>Total Attributes</dt><dd>%d</dd>' % project_totals.get('total_attributes', 0))
-				
-				# Coupling Metrics
-				f.write('<dt>Efferent Coupling (Ce)</dt><dd>%.1f avg</dd>' % coupling_metrics.get('avg_efferent_coupling', 0))
-				f.write('<dt>Afferent Coupling (Ca)</dt><dd>%.1f avg</dd>' % coupling_metrics.get('avg_afferent_coupling', 0))
-				
-				# Quality Metrics with recommendations
-				instability = quality_metrics.get('avg_instability', 0)
-				f.write('<dt>Instability (I)</dt><dd>%.3f</dd>' % instability)
-				
-				abstractness = quality_metrics.get('avg_abstractness', 0)
-				f.write('<dt>Abstractness (A)</dt><dd>%.3f</dd>' % abstractness)
-				
-				distance = quality_metrics.get('avg_distance_main_sequence', 0)
-				f.write('<dt>Distance from Main Sequence</dt><dd>%.3f</dd>' % distance)
-				
-				# Averages per OOP file
-				f.write('<dt>Classes per OOP File</dt><dd>%.1f</dd>' % averages.get('classes_per_file', 0))
-				f.write('<dt>Methods per OOP File</dt><dd>%.1f</dd>' % averages.get('methods_per_file', 0))
-				f.write('<dt>Attributes per OOP File</dt><dd>%.1f</dd>' % averages.get('attributes_per_file', 0))
-				f.write('<dt>Abstraction Ratio</dt><dd>%.1f%%</dd>' % averages.get('abstraction_ratio', 0))
-				
-				# OOP Quality Assessment
-				if distance <= 0.1:
-					oop_quality = 'green'
-					oop_text = 'EXCELLENT'
-				elif distance <= 0.2:
-					oop_quality = 'orange'
-					oop_text = 'GOOD'
-				else:
-					oop_quality = 'red'
-					oop_text = 'NEEDS IMPROVEMENT'
-				
-				f.write('<dt>OOP Design Quality</dt><dd><span style="color: %s; font-weight: bold;">%s</span> (Distance: %.3f, Optimal: ≤0.1)</dd>' % (oop_quality, oop_text, distance))
-				
-				# OOP Recommendations
-				recommendations = []
-				if instability > 0.8:
-					recommendations.append("High instability detected - consider reducing outgoing dependencies")
-				if abstractness < 0.1 and project_totals.get('total_classes', 0) > 10:
-					recommendations.append("Low abstractness - consider introducing interfaces/abstract classes")
-				if averages.get('methods_per_file', 0) > 20:
-					recommendations.append("High method count per file - consider breaking down large classes")
-				
-				if recommendations:
-					f.write('<dt>OOP Recommendations</dt><dd>')
-					for rec in recommendations:
-						f.write(f'• {rec}<br>')
-					f.write('</dd>')
-				
-				f.write('</dl>')
-			elif oop_metrics:
-				f.write('<h4>Object-Oriented Programming (OOP) Metrics</h4>')
-				f.write('<p><em>%s</em></p>' % oop_metrics.get('message', 'No OOP constructs analyzed'))
 		
 		# Team Collaboration Metrics  
 		f.write('<h3>Team Collaboration</h3>')
