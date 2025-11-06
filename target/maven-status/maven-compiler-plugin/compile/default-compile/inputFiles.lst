@@ -1,0 +1,14 @@
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/analyzer/CommitAnalyzer.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/core/Configuration.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/model/FileStatistics.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/core/GitCommandExecutor.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/model/CodeMetrics.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/model/RepositoryData.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/model/ProjectHealthMetrics.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/analyzer/BranchAnalyzer.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/ui/controller/MainController.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/analyzer/RepositoryAnalyzer.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/GitStatsApplication.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/model/AuthorStatistics.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/analyzer/FileAnalyzer.java
+/media/lechibang/Work and play/Work/gitstats3/src/main/java/com/gitstats/model/BranchInfo.java

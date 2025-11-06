@@ -1,0 +1,144 @@
+/* GitStats JavaFX - Dark Theme Stylesheet */
+
+.root {
+    -fx-base: #2b2b2b;
+    -fx-background: #1e1e1e;
+    -fx-control-inner-background: #2b2b2b;
+    -fx-accent: #4a90e2;
+}
+
+/* Section boxes */
+.section-box {
+    -fx-background-color: #2b2b2b;
+    -fx-border-color: #3c3c3c;
+}
+
+.progress-box {
+    -fx-background-color: #252525;
+}
+
+/* Text colors */
+.section-title, .tab-title {
+    -fx-text-fill: #e0e0e0;
+}
+
+.status-label {
+    -fx-text-fill: #a0a0a0;
+}
+
+.placeholder-text {
+    -fx-text-fill: #666666;
+}
+
+/* Buttons */
+.primary-button {
+    -fx-background-color: #3c3c3c;
+    -fx-text-fill: #e0e0e0;
+}
+
+.primary-button:hover {
+    -fx-background-color: #4a4a4a;
+}
+
+.accent-button {
+    -fx-background-color: #4a90e2;
+    -fx-text-fill: white;
+}
+
+.accent-button:hover {
+    -fx-background-color: #357abd;
+}
+
+/* Text fields */
+.text-field {
+    -fx-background-color: #2b2b2b;
+    -fx-text-fill: #e0e0e0;
+    -fx-border-color: #3c3c3c;
+}
+
+.text-field:focused {
+    -fx-border-color: #4a90e2;
+}
+
+/* Progress bar */
+.progress-bar > .track {
+    -fx-background-color: #3c3c3c;
+}
+
+.progress-bar > .bar {
+    -fx-background-color: linear-gradient(to right, #4a90e2, #357abd);
+}
+
+/* Tab pane */
+.tab-pane > .tab-header-area > .tab-header-background {
+    -fx-background-color: #252525;
+}
+
+.tab {
+    -fx-background-color: #2b2b2b;
+}
+
+.tab:selected {
+    -fx-background-color: #1e1e1e;
+    -fx-border-color: #3c3c3c;
+}
+
+.tab:hover {
+    -fx-background-color: #353535;
+}
+
+.tab-label {
+    -fx-text-fill: #a0a0a0;
+}
+
+.tab:selected .tab-label {
+    -fx-text-fill: #4a90e2;
+}
+
+/* ScrollPane */
+.scroll-pane > .viewport {
+    -fx-background-color: #1e1e1e;
+}
+
+/* Tables */
+.table-view {
+    -fx-background-color: #2b2b2b;
+    -fx-border-color: #3c3c3c;
+}
+
+.table-view .column-header {
+    -fx-background-color: #252525;
+}
+
+.table-row-cell {
+    -fx-background-color: #2b2b2b;
+    -fx-text-fill: #e0e0e0;
+}
+
+.table-row-cell:odd {
+    -fx-background-color: #252525;
+}
+
+.table-row-cell:selected {
+    -fx-background-color: #4a90e2;
+}
+
+/* Menu bar */
+.menu-bar {
+    -fx-background-color: #252525;
+    -fx-border-color: #3c3c3c;
+}
+
+.menu-item {
+    -fx-background-color: #2b2b2b;
+    -fx-text-fill: #e0e0e0;
+}
+
+.menu-item:focused {
+    -fx-background-color: #4a90e2;
+}
+
+/* Labels and text */
+.label {
+    -fx-text-fill: #e0e0e0;
+}

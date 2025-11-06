@@ -1,0 +1,16 @@
+com/gitstats/core/GitCommandExecutor.class
+com/gitstats/model/AuthorStatistics.class
+com/gitstats/model/FileStatistics.class
+com/gitstats/model/ProjectHealthMetrics.class
+com/gitstats/analyzer/RepositoryAnalyzer$ProgressCallback.class
+com/gitstats/ui/controller/MainController.class
+com/gitstats/analyzer/FileAnalyzer.class
+com/gitstats/core/Configuration.class
+com/gitstats/model/CodeMetrics.class
+com/gitstats/analyzer/BranchAnalyzer.class
+com/gitstats/ui/controller/MainController$1.class
+com/gitstats/model/BranchInfo.class
+com/gitstats/GitStatsApplication.class
+com/gitstats/analyzer/CommitAnalyzer.class
+com/gitstats/model/RepositoryData.class
+com/gitstats/analyzer/RepositoryAnalyzer.class

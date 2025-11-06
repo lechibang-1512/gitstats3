@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.gitstats.ui.controller.MainController"
+            stylesheets="@../css/main.css">
+    
+    <!-- Top Menu Bar -->
+    <top>
+        <MenuBar>
+            <Menu text="File">
+                <MenuItem text="Open Repository..." onAction="#handleBrowse"/>
+                <MenuItem text="Export..." onAction="#handleExport"/>
+                <SeparatorMenuItem/>
+                <MenuItem text="Exit" onAction="#cleanup"/>
+            </Menu>
+            <Menu text="Tools">
+                <MenuItem text="Settings..." onAction="#handleSettings"/>
+            </Menu>
+            <Menu text="Help">
+                <MenuItem text="About" onAction="#handleAbout"/>
+            </Menu>
+        </MenuBar>
+    </top>
+    
+    <!-- Main Content -->
+    <center>
+        <VBox spacing="20" style="-fx-padding: 20;">
+            
+            <!-- Repository Selection -->
+            <VBox spacing="10" styleClass="section-box">
+                <Label text="Repository Selection" styleClass="section-title"/>
+                
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <TextField fx:id="repositoryPathField" 
+                              promptText="Select a Git repository..."
+                              HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="browseButton" text="Browse..." 
+                           styleClass="primary-button"/>
+                    <Button fx:id="analyzeButton" text="Analyze" 
+                           styleClass="accent-button"/>
+                </HBox>
+            </VBox>
+            
+            <!-- Progress Area -->
+            <VBox spacing="10" styleClass="progress-box">
+                <Label fx:id="statusLabel" text="Ready" styleClass="status-label"/>
+                <ProgressBar fx:id="progressBar" maxWidth="Infinity" 
+                            progress="0" visible="false"/>
+            </VBox>
+            
+            <!-- Results Tabs -->
+            <TabPane fx:id="resultsTabPane" VBox.vgrow="ALWAYS" 
+                     tabClosingPolicy="UNAVAILABLE">
+                
+                <!-- Summary Tab -->
+                <Tab fx:id="summaryTab" text="Summary" closable="false">
+                    <ScrollPane fitToWidth="true">
+                        <VBox spacing="15" style="-fx-padding: 15;">
+                            <Label text="Repository Summary" 
+                                  styleClass="tab-title"/>
+                            <Label text="Analysis results will appear here after analyzing a repository." 
+                                  styleClass="placeholder-text"/>
+                        </VBox>
+                    </ScrollPane>
+                </Tab>
+                
+                <!-- Authors Tab -->
+                <Tab fx:id="authorsTab" text="Authors" closable="false">
+                    <ScrollPane fitToWidth="true">
+                        <VBox spacing="15" style="-fx-padding: 15;">
+                            <Label text="Author Statistics" 
+                                  styleClass="tab-title"/>
+                            <Label text="Author contribution data will appear here." 
+                                  styleClass="placeholder-text"/>
+                        </VBox>
+                    </ScrollPane>
+                </Tab>
+                
+                <!-- Files Tab -->
+                <Tab fx:id="filesTab" text="Files" closable="false">
+                    <ScrollPane fitToWidth="true">
+                        <VBox spacing="15" style="-fx-padding: 15;">
+                            <Label text="File Statistics" 
+                                  styleClass="tab-title"/>
+                            <Label text="File analysis data will appear here." 
+                                  styleClass="placeholder-text"/>
+                        </VBox>
+                    </ScrollPane>
+                </Tab>
+                
+                <!-- Metrics Tab -->
+                <Tab fx:id="metricsTab" text="Code Metrics" closable="false">
+                    <ScrollPane fitToWidth="true">
+                        <VBox spacing="15" style="-fx-padding: 15;">
+                            <Label text="Code Quality Metrics" 
+                                  styleClass="tab-title"/>
+                            <Label text="Code metrics and health indicators will appear here." 
+                                  styleClass="placeholder-text"/>
+                        </VBox>
+                    </ScrollPane>
+                </Tab>
+                
+            </TabPane>
+            
+        </VBox>
+    </center>
+    
+    <!-- Bottom Status Bar -->
+    <bottom>
+        <HBox spacing="10" alignment="CENTER_LEFT" 
+              style="-fx-padding: 5 10; -fx-background-color: #f0f0f0;">
+            <Label text="GitStats JavaFX v3.0.0"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Label text="Ready"/>
+        </HBox>
+    </bottom>
+    
+</BorderPane>

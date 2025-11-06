@@ -1,0 +1,212 @@
+/* GitStats JavaFX - Main Stylesheet */
+
+/* Root styling */
+.root {
+    -fx-font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    -fx-font-size: 14px;
+    -fx-background-color: #ffffff;
+}
+
+/* Section boxes */
+.section-box {
+    -fx-background-color: #f8f9fa;
+    -fx-padding: 15;
+    -fx-background-radius: 8;
+    -fx-border-color: #dee2e6;
+    -fx-border-radius: 8;
+    -fx-border-width: 1;
+}
+
+.progress-box {
+    -fx-background-color: #e9ecef;
+    -fx-padding: 10;
+    -fx-background-radius: 5;
+}
+
+/* Section titles */
+.section-title {
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #212529;
+}
+
+.tab-title {
+    -fx-font-size: 20px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #495057;
+}
+
+.status-label {
+    -fx-font-size: 13px;
+    -fx-text-fill: #6c757d;
+}
+
+.placeholder-text {
+    -fx-font-size: 14px;
+    -fx-text-fill: #adb5bd;
+    -fx-font-style: italic;
+}
+
+/* Buttons */
+.button {
+    -fx-background-radius: 5;
+    -fx-border-radius: 5;
+    -fx-padding: 8 16;
+    -fx-cursor: hand;
+}
+
+.primary-button {
+    -fx-background-color: #6c757d;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+.primary-button:hover {
+    -fx-background-color: #5a6268;
+}
+
+.accent-button {
+    -fx-background-color: #007bff;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+.accent-button:hover {
+    -fx-background-color: #0056b3;
+}
+
+.accent-button:disabled {
+    -fx-background-color: #cccccc;
+    -fx-opacity: 0.6;
+}
+
+/* Text fields */
+.text-field {
+    -fx-background-radius: 5;
+    -fx-border-radius: 5;
+    -fx-padding: 6 12;
+    -fx-border-color: #ced4da;
+    -fx-border-width: 1;
+}
+
+.text-field:focused {
+    -fx-border-color: #007bff;
+    -fx-border-width: 2;
+}
+
+/* Progress bar */
+.progress-bar {
+    -fx-accent: #007bff;
+}
+
+.progress-bar > .track {
+    -fx-background-color: #e9ecef;
+    -fx-background-radius: 10;
+}
+
+.progress-bar > .bar {
+    -fx-background-color: linear-gradient(to right, #007bff, #0056b3);
+    -fx-background-radius: 10;
+}
+
+/* Tab pane */
+.tab-pane {
+    -fx-tab-min-height: 35px;
+}
+
+.tab-pane > .tab-header-area > .tab-header-background {
+    -fx-background-color: #f8f9fa;
+}
+
+.tab {
+    -fx-background-color: #e9ecef;
+    -fx-background-radius: 5 5 0 0;
+    -fx-padding: 8 20;
+}
+
+.tab:selected {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #dee2e6;
+    -fx-border-width: 1 1 0 1;
+}
+
+.tab:hover {
+    -fx-background-color: #dee2e6;
+}
+
+.tab-label {
+    -fx-text-fill: #495057;
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+}
+
+.tab:selected .tab-label {
+    -fx-text-fill: #007bff;
+}
+
+/* ScrollPane */
+.scroll-pane {
+    -fx-background-color: transparent;
+}
+
+.scroll-pane > .viewport {
+    -fx-background-color: white;
+}
+
+/* Tables */
+.table-view {
+    -fx-background-color: white;
+    -fx-border-color: #dee2e6;
+    -fx-border-width: 1;
+}
+
+.table-view .column-header {
+    -fx-background-color: #f8f9fa;
+    -fx-font-weight: bold;
+}
+
+.table-row-cell:odd {
+    -fx-background-color: #f8f9fa;
+}
+
+.table-row-cell:selected {
+    -fx-background-color: #007bff;
+    -fx-text-fill: white;
+}
+
+/* Menu bar */
+.menu-bar {
+    -fx-background-color: #f8f9fa;
+    -fx-border-color: #dee2e6;
+    -fx-border-width: 0 0 1 0;
+}
+
+.menu-item {
+    -fx-padding: 5 15;
+}
+
+.menu-item:focused {
+    -fx-background-color: #007bff;
+    -fx-text-fill: white;
+}
+
+/* Alert dialogs */
+.alert {
+    -fx-background-color: white;
+}
+
+.alert > .dialog-pane > .header-panel {
+    -fx-background-color: #f8f9fa;
+}
+
+.alert.information > .dialog-pane > .header-panel {
+    -fx-background-color: #d1ecf1;
+}
+
+.alert.warning > .dialog-pane > .header-panel {
+    -fx-background-color: #fff3cd;
+}
+
+.alert.error > .dialog-pane > .header-panel {
+    -fx-background-color: #f8d7da;
+}
