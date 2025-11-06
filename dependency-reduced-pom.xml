@@ -33,30 +33,60 @@
             <goals>
               <goal>shade</goal>
             </goals>
-            <configuration>
-              <createDependencyReducedPom>true</createDependencyReducedPom>
-              <filters>
-                <filter>
-                  <artifact>*:*</artifact>
-                  <excludes>
-                    <exclude>module-info.class</exclude>
-                    <exclude>META-INF/*.SF</exclude>
-                    <exclude>META-INF/*.DSA</exclude>
-                    <exclude>META-INF/*.RSA</exclude>
-                  </excludes>
-                </filter>
-              </filters>
-              <transformers>
-                <transformer>
-                  <mainClass>com.gitstats.GitStatsApplication</mainClass>
-                </transformer>
-                <transformer />
-                <transformer />
-                <transformer />
-              </transformers>
-            </configuration>
           </execution>
         </executions>
+        <configuration>
+          <createDependencyReducedPom>true</createDependencyReducedPom>
+          <filters>
+            <filter>
+              <artifact>*:*</artifact>
+              <excludes>
+                <exclude>module-info.class</exclude>
+                <exclude>META-INF/*.SF</exclude>
+                <exclude>META-INF/*.DSA</exclude>
+                <exclude>META-INF/*.RSA</exclude>
+                <exclude>META-INF/versions/*/module-info.class</exclude>
+              </excludes>
+            </filter>
+            <filter>
+              <artifact>commons-io:commons-io</artifact>
+              <excludes>
+                <exclude>META-INF/versions/9/module-info.class</exclude>
+              </excludes>
+            </filter>
+            <filter>
+              <artifact>org.apache.commons:commons-lang3</artifact>
+              <excludes>
+                <exclude>META-INF/versions/9/module-info.class</exclude>
+              </excludes>
+            </filter>
+            <filter>
+              <artifact>com.google.code.gson:gson</artifact>
+              <excludes>
+                <exclude>META-INF/versions/9/module-info.class</exclude>
+              </excludes>
+            </filter>
+            <filter>
+              <artifact>org.slf4j:slf4j-api</artifact>
+              <excludes>
+                <exclude>META-INF/versions/9/module-info.class</exclude>
+              </excludes>
+            </filter>
+          </filters>
+          <transformers>
+            <transformer>
+              <mainClass>com.gitstats.GitStatsApplication</mainClass>
+            </transformer>
+            <transformer />
+            <transformer />
+            <transformer>
+              <addHeader>false</addHeader>
+            </transformer>
+            <transformer>
+              <resource>META-INF/substrate/config/resourcebundles</resource>
+            </transformer>
+          </transformers>
+        </configuration>
       </plugin>
     </plugins>
   </build>
