@@ -15,7 +15,7 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.release>21</maven.compiler.release>
         <maven.compiler.target>21</maven.compiler.target>
         <javafx.version>21.0.1</javafx.version>
         <junit.version>5.10.1</junit.version>
@@ -99,11 +99,30 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <source>21</source>
+                    <release>21</release>
                     <target>21</target>
+                    <compilerArgs>
+                        <arg>-Xlint:all</arg>
+                        <arg>-Xlint:-processing</arg>
+                    </compilerArgs>
                 </configuration>
             </plugin>
 
+            <!-- Maven JAR Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.gitstats.Launcher</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <!-- JavaFX Maven Plugin for running the application -->
             <plugin>
                 <groupId>org.openjfx</groupId>
                 <artifactId>javafx-maven-plugin</artifactId>
@@ -113,66 +132,36 @@
                 </configuration>
             </plugin>
 
+            <!-- Maven Shade Plugin - Create uber JAR with workaround for JavaFX -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <version>3.5.1</version>
                 <configuration>
-                    <!-- Suppress overlapping resource warnings -->
-                    <createDependencyReducedPom>true</createDependencyReducedPom>
+                    <createDependencyReducedPom>false</createDependencyReducedPom>
+                    <shadedArtifactAttached>false</shadedArtifactAttached>
+                    <finalName>${project.artifactId}-${project.version}</finalName>
                     <filters>
                         <filter>
-                            <!-- Exclude module-info.class files to avoid strong encapsulation warnings -->
                             <artifact>*:*</artifact>
                             <excludes>
-                                <exclude>module-info.class</exclude>
                                 <exclude>META-INF/*.SF</exclude>
                                 <exclude>META-INF/*.DSA</exclude>
                                 <exclude>META-INF/*.RSA</exclude>
-                                <exclude>META-INF/versions/*/module-info.class</exclude>
-                            </excludes>
-                        </filter>
-                        <!-- Handle overlapping multi-release module-info -->
-                        <filter>
-                            <artifact>commons-io:commons-io</artifact>
-                            <excludes>
-                                <exclude>META-INF/versions/9/module-info.class</exclude>
-                            </excludes>
-                        </filter>
-                        <filter>
-                            <artifact>org.apache.commons:commons-lang3</artifact>
-                            <excludes>
-                                <exclude>META-INF/versions/9/module-info.class</exclude>
-                            </excludes>
-                        </filter>
-                        <filter>
-                            <artifact>com.google.code.gson:gson</artifact>
-                            <excludes>
-                                <exclude>META-INF/versions/9/module-info.class</exclude>
-                            </excludes>
-                        </filter>
-                        <filter>
-                            <artifact>org.slf4j:slf4j-api</artifact>
-                            <excludes>
-                                <exclude>META-INF/versions/9/module-info.class</exclude>
                             </excludes>
                         </filter>
                     </filters>
                     <transformers>
                         <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                            <mainClass>com.gitstats.GitStatsApplication</mainClass>
+                            <mainClass>com.gitstats.Launcher</mainClass>
+                            <manifestEntries>
+                                <Multi-Release>true</Multi-Release>
+                            </manifestEntries>
                         </transformer>
-                        <!-- Merge service provider files -->
                         <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-                        <!-- Merge Apache license files -->
                         <transformer implementation="org.apache.maven.plugins.shade.resource.ApacheLicenseResourceTransformer"/>
-                        <!-- Merge Apache notice files -->
                         <transformer implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer">
                             <addHeader>false</addHeader>
-                        </transformer>
-                        <!-- Append resource transformers for overlapping files -->
-                        <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
-                            <resource>META-INF/substrate/config/resourcebundles</resource>
                         </transformer>
                     </transformers>
                 </configuration>

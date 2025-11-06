@@ -9,6 +9,7 @@ com/gitstats/core/Configuration.class
 com/gitstats/model/CodeMetrics.class
 com/gitstats/analyzer/BranchAnalyzer.class
 com/gitstats/ui/controller/MainController$1.class
+com/gitstats/Launcher.class
 com/gitstats/model/BranchInfo.class
 com/gitstats/GitStatsApplication.class
 com/gitstats/analyzer/CommitAnalyzer.class

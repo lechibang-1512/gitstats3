@@ -30,7 +30,6 @@ public class RepositoryAnalyzer {
     
     private static final Logger logger = LoggerFactory.getLogger(RepositoryAnalyzer.class);
     
-    private final Configuration config;
     private final GitCommandExecutor gitExecutor;
     private final ExecutorService executorService;
     
@@ -40,7 +39,7 @@ public class RepositoryAnalyzer {
     private final BranchAnalyzer branchAnalyzer;
     
     public RepositoryAnalyzer(File repositoryPath) {
-        this.config = Configuration.getInstance();
+        Configuration config = Configuration.getInstance();
         this.gitExecutor = new GitCommandExecutor(repositoryPath);
         this.executorService = Executors.newFixedThreadPool(config.getProcesses());
         
@@ -209,7 +208,7 @@ public class RepositoryAnalyzer {
         int busFactor = 0;
         
         // Sort authors by commit count
-        var sortedAuthors = data.getAuthorStats().values().stream()
+        java.util.List<AuthorStatistics> sortedAuthors = data.getAuthorStats().values().stream()
             .sorted((a, b) -> Integer.compare(b.getTotalCommits(), a.getTotalCommits()))
             .toList();
         

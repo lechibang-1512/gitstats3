@@ -6,7 +6,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.gitstats.analyzer.RepositoryAnalyzer;
-import com.gitstats.core.Configuration;
 import com.gitstats.model.RepositoryData;
 
 import javafx.application.Platform;
@@ -16,7 +15,6 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
-import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextField;
 import javafx.stage.DirectoryChooser;
@@ -36,15 +34,8 @@ public class MainController {
     @FXML private Label statusLabel;
     @FXML private TabPane resultsTabPane;
     
-    // Results tabs
-    @FXML private Tab summaryTab;
-    @FXML private Tab authorsTab;
-    @FXML private Tab filesTab;
-    @FXML private Tab metricsTab;
-    
     private Stage primaryStage;
     private RepositoryData currentData;
-    private final Configuration config = Configuration.getInstance();
     
     @FXML
     public void initialize() {
@@ -179,12 +170,14 @@ public class MainController {
         resultsTabPane.setDisable(false);
   
         showInfo("Analysis Results", 
-            String.format("Analysis complete for %s\n\n" +
-                "Total Commits: %d\n" +
-                "Total Files: %d\n" +
-                "Total Lines: %d\n" +
-                "Authors: %d\n" +
-                "Age: %d days",
+            String.format("""
+                Analysis complete for %s
+                
+                Total Commits: %d
+                Total Files: %d
+                Total Lines: %d
+                Authors: %d
+                Age: %d days""",
                 data.getProjectName(),
                 data.getTotalCommits(),
                 data.getTotalFiles(),
@@ -197,7 +190,7 @@ public class MainController {
      * Handle settings menu item
      */
     @FXML
-    private void handleSettings() {
+    public void handleSettings() {
         logger.info("Settings menu clicked");
     }
     
@@ -205,7 +198,7 @@ public class MainController {
      * Handle export menu item
      */
     @FXML
-    private void handleExport() {
+    public void handleExport() {
         if (currentData == null) {
             showWarning("No data to export. Please analyze a repository first.");
             return;
@@ -218,16 +211,19 @@ public class MainController {
      * Handle about menu item
      */
     @FXML
-    private void handleAbout() {
+    public void handleAbout() {
         showInfo("About GitStats", 
-            "GitStats JavaFX v3.0.0\n\n" +
-            "A comprehensive Git repository statistics analyzer\n" +
-            "with modern JavaFX interface.\n\n" +
-            "Features:\n" +
-            "• Repository analysis\n" +
-            "• Code quality metrics\n" +
-            "• Team collaboration insights\n" +
-            "• Interactive visualizations");
+            """
+            GitStats JavaFX v3.0.0
+            
+            A comprehensive Git repository statistics analyzer
+            with modern JavaFX interface.
+            
+            Features:
+            • Repository analysis
+            • Code quality metrics
+            • Team collaboration insights
+            • Interactive visualizations""");
     }
     
     /**
