@@ -16,6 +16,9 @@ import threading
 # Import OOP Metrics Module for Distance from Main Sequence analysis
 from oop_metrics import OOPMetricsAnalyzer, format_oop_report
 
+# Import sortable JavaScript code
+from sortable import get_sortable_js
+
 if sys.version_info < (3, 6):
 	print("Python 3.6 or higher is required for gitstats", file=sys.stderr)
 	sys.exit(1)
@@ -1327,7 +1330,7 @@ class DataCollector:
 
 	# : get a dictionary of domains
 	def getDomainInfo(self, domain):
-		return None
+		return {}
 
 	##
 	# Get a list of authors
@@ -2456,8 +2459,8 @@ class DataCollector:
 		Returns:
 			list: List of file paths that match allowed extensions
 		"""
+		original_cwd = os.getcwd() if repository_path else None
 		if repository_path:
-			original_cwd = os.getcwd()
 			try:
 				os.chdir(repository_path)
 			except OSError as e:
@@ -2492,7 +2495,7 @@ class DataCollector:
 			print(f'Warning: Failed to get repository files: {e}')
 			return []
 		finally:
-			if repository_path:
+			if repository_path and original_cwd:
 				try:
 					os.chdir(original_cwd)
 				except OSError:
@@ -2509,8 +2512,8 @@ class DataCollector:
 		"""
 		print('\n🧮 Calculating Maintainability Index (MI) for repository...')
 		
+		original_cwd = os.getcwd() if repository_path else None
 		if repository_path:
-			original_cwd = os.getcwd()
 			try:
 				os.chdir(repository_path)
 				print(f'  📁 Repository: {repository_path}')
@@ -2604,7 +2607,7 @@ class DataCollector:
 			print(f'Error during MI calculation: {e}')
 			return None
 		finally:
-			if repository_path:
+			if repository_path and original_cwd:
 				try:
 					os.chdir(original_cwd)
 				except OSError:
@@ -2964,7 +2967,10 @@ class DataCollector:
 				
 				try:
 					# Use full path since we're not in the repository directory
-					full_filepath = os.path.join(repository_path, filepath)
+					if repository_path:
+						full_filepath = os.path.join(repository_path, filepath)
+					else:
+						full_filepath = filepath
 					metrics = self.calculate_comprehensive_metrics(full_filepath)
 					if not metrics:
 						continue
@@ -3950,7 +3956,7 @@ class GitDataCollector(DataCollector):
 		try:
 			if conf['verbose']:
 				print('Calculating comprehensive software metrics...')
-			self.calculate_comprehensive_metrics()
+			self._calculate_comprehensive_project_metrics()
 		except Exception as e:
 			if conf['debug']:
 				print(f'Warning: Comprehensive metrics calculation failed: {e}')
@@ -4564,7 +4570,7 @@ class GitDataCollector(DataCollector):
 	
 	def getLinesOfCodeByYear(self):
 		"""Get lines of code by year."""
-		return dict(self.lines_of_code_by_year)
+		return dict(self.lines_added_by_year)
 	
 	def getLinesAddedByAuthorByYear(self):
 		"""Get lines added by author by year."""
@@ -5864,7 +5870,8 @@ class HTMLReportCreator(ReportCreator):
 		commits_by_author_by_year = data.getCommitsByAuthorByYear()
 		if commits_by_author_by_year:
 			# Calculate top authors by total commits
-			author_commit_totals = defaultdict(int)
+			from collections import defaultdict as dd
+			author_commit_totals = dd(int)
 			for year_data in commits_by_author_by_year.values():
 				for author, commits in year_data.items():
 					author_commit_totals[author] += commits
@@ -6422,6 +6429,9 @@ class HTMLReportCreator(ReportCreator):
 			os.chdir(old_dir)
 
 	def printHeader(self, f, title = ''):
+		# Get JavaScript content from sortable module
+		js_content = get_sortable_js().replace('%', '%%')
+		
 		f.write(
 """<!DOCTYPE html>
 <html>
@@ -6430,10 +6440,12 @@ class HTMLReportCreator(ReportCreator):
 	<title>GitStats - %s</title>
 	<link rel="stylesheet" href="%s" type="text/css">
 	<meta name="generator" content="GitStats %s">
-	<script type="text/javascript" src="sortable.js"></script>
+	<script type="text/javascript">
+%s
+	</script>
 </head>
 <body>
-""" % (self.title, conf['style'], getversion()))
+""" % (self.title, conf['style'], getversion(), js_content))
 
 	def printCombinedHeader(self, f):
 		# Read CSS content
@@ -6448,16 +6460,8 @@ class HTMLReportCreator(ReportCreator):
 		except FileNotFoundError:
 			print(f'Warning: CSS file not found at {css_path}')
 
-		# Read JavaScript content  
-		js_content = ""
-		js_path = os.path.join(binarypath, 'sortable.js')
-		try:
-			with open(js_path, 'r') as js_file:
-				js_content = js_file.read()
-				# Escape % characters to prevent string formatting issues
-				js_content = js_content.replace('%', '%%')
-		except FileNotFoundError:
-			print(f'Warning: JavaScript file not found at {js_path}')
+		# Get JavaScript content from sortable module
+		js_content = get_sortable_js().replace('%', '%%')
 
 		f.write(
 """<!DOCTYPE html>
@@ -7842,6 +7846,7 @@ class GitStats:
 			
 			# Use ThreadPoolExecutor for I/O-bound repository processing
 			# (ProcessPoolExecutor would be better for CPU-bound, but git operations are mostly I/O)
+			futures = {}
 			with ThreadPoolExecutor(max_workers=max_workers) as executor:
 				try:
 					# Submit all jobs in the batch
@@ -8028,7 +8033,7 @@ class GitStats:
 	def _get_memory_usage(self):
 		"""Get current memory usage in MB. Returns None if unavailable."""
 		try:
-			import psutil
+			import psutil  # type: ignore
 			process = psutil.Process()
 			return process.memory_info().rss / 1024 / 1024  # Convert to MB
 		except ImportError:
