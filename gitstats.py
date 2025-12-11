@@ -14,7 +14,7 @@ from collections import defaultdict
 import threading
 
 # Import OOP Metrics Module for Distance from Main Sequence analysis
-from oop_metrics import OOPMetricsAnalyzer, format_oop_report
+from gitstats_oopmetrics import OOPMetricsAnalyzer, format_oop_report
 
 # Import sortable JavaScript code
 from sortable import get_sortable_js
