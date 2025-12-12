@@ -9,7 +9,7 @@ import os
 import time
 
 from .gitstats_config import conf, get_config
-from .gitstats_helpers import WEEKDAYS, getkeyssortedbyvalues, getkeyssortedbyvaluekey
+from .gitstats_helpers import WEEKDAYS, getkeyssortedbyvalues, getkeyssortedbyvaluekey, get_output_format
 from .gitstats_gitcommands import getversion, getgitversion, get_exectime_external
 from .gitstats_tabledata import TableDataGenerator
 from .gitstats_sortable import get_sortable_js

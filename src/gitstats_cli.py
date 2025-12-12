@@ -13,10 +13,12 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from .gitstats_config import conf, get_config
-from .gitstats_gitcommands import getversion, getgitversion, is_git_repository
+from .gitstats_gitcommands import getversion, getgitversion, is_git_repository, get_exectime_external
 from .gitstats_gitdatacollector import GitDataCollector
 from .gitstats_htmlreport import HTMLReportCreator
 from .gitstats_repository import discover_repositories, _discover_repositories_concurrent
+from .gitstats_helpers import time_start
+
 
 
 def usage():
@@ -643,6 +645,7 @@ class GitStats:
 
 		time_end = time.time()
 		exectime_internal = time_end - time_start
+		exectime_external = get_exectime_external()
 		external_percentage = (100.0 * exectime_external) / exectime_internal if exectime_internal > 0 else 0.0
 		print('Execution time %.5f secs, %.5f secs (%.2f %%) in external commands)' % (exectime_internal, exectime_external, external_percentage))
 		

@@ -13,13 +13,14 @@ from multiprocessing import Pool
 from concurrent.futures import ThreadPoolExecutor
 
 from .gitstats_config import conf, get_config
-from .gitstats_helpers import WEEKDAYS, getkeyssortedbyvalues, getkeyssortedbyvaluekey, should_include_file
+from .gitstats_helpers import WEEKDAYS, getkeyssortedbyvalues, getkeyssortedbyvaluekey, should_include_file, getstatsummarycounts
 from .gitstats_gitcommands import (
     getpipeoutput, getpipeoutput_list,
     get_default_branch, get_first_parent_flag,
     getlogrange, getcommitrange
 )
 from .gitstats_datacollector import DataCollector
+from .gitstats_analyzers import getnumoffilesfromrev, getnumoflinesinblob, analyzesloc
 
 
 class GitDataCollector(DataCollector):

@@ -7,6 +7,7 @@ Contains constants and utility functions extracted from the monolithic gitstats.
 import os
 import platform
 import re
+import time
 from typing import Dict, List, Any, Tuple
 
 from .gitstats_config import get_config
@@ -14,6 +15,10 @@ from .gitstats_config import get_config
 
 # Platform detection
 ON_LINUX = platform.system() == 'Linux'
+
+# Timing variables
+exectime_internal = 0.0
+time_start = time.time()
 
 # Day of week constants
 WEEKDAYS = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')
@@ -162,3 +167,8 @@ def parse_timestamp(timestamp_str: str) -> int:
         return int(timestamp_str)
     except (ValueError, TypeError):
         return 0
+
+
+def get_output_format() -> str:
+    """Return output format description."""
+    return "HTML tables (no charts)"
