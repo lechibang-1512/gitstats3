@@ -7,8 +7,8 @@ import unittest
 import sys
 import os
 
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add src directory to path for package imports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
 
 from gitstats_oopmetrics import (
     parse, walk, iter_child_nodes,

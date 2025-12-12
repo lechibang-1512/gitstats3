@@ -1,0 +1,174 @@
+"""
+Gitstats3 - Modular Git Repository Statistics Package
+
+This package provides comprehensive git repository analysis and HTML report generation.
+All functionality is organized into focused modules for better maintainability.
+"""
+
+# Configuration
+from .gitstats_config import (
+    GitStatsConfig,
+    get_config,
+    set_config,
+    conf,
+    update_conf_from_config,
+)
+
+# Utilities
+from .gitstats_helpers import (
+    WEEKDAYS,
+    ON_LINUX,
+    getkeyssortedbyvalues,
+    getkeyssortedbyvaluekey,
+    getstatsummarycounts,
+    should_include_file,
+    format_duration,
+    sanitize_filename,
+    parse_timestamp,
+)
+
+# Git commands
+from .gitstats_gitcommands import (
+    getpipeoutput,
+    getpipeoutput_list,
+    get_default_branch,
+    get_first_parent_flag,
+    getlogrange,
+    getcommitrange,
+    is_git_repository,
+    getversion,
+    getgitversion,
+    get_exectime_external,
+    reset_exectime_external,
+)
+
+# Collectors
+from .gitstats_basecollector import BaseCollector
+from .gitstats_datacollector import DataCollector
+from .gitstats_gitdatacollector import GitDataCollector
+
+# Parsers
+from .gitstats_ast import (
+    ASTNode,
+    ModuleDef,
+    ClassDef,
+    InterfaceDef,
+    FunctionDef,
+    ImportDef,
+    AttributeDef,
+    walk,
+    iter_child_nodes,
+)
+from .gitstats_tokenizer import (
+    Tokenizer,
+    Token,
+    TokenType,
+    TokenizerState,
+    LANGUAGE_KEYWORDS,
+)
+
+# Metrics
+from .gitstats_maintainability import (
+    calculate_maintainability_index,
+    calculate_loc_metrics,
+    calculate_halstead_metrics,
+    calculate_mccabe_complexity,
+    interpret_maintainability_index,
+)
+from .gitstats_oopmetrics import OOPMetricsAnalyzer, format_oop_report
+
+# Reports
+from .gitstats_tabledata import TableDataGenerator
+from .gitstats_htmlreport import ReportCreator, HTMLReportCreator, html_linkify, html_header
+from .gitstats_sortable import get_sortable_js
+
+# Repository discovery
+from .gitstats_repository import (
+    _is_bare_repository,
+    discover_repositories,
+    _discover_repositories_concurrent,
+)
+
+# CLI
+from .gitstats_cli import usage, GitStats
+
+
+__all__ = [
+    # Config
+    "GitStatsConfig",
+    "get_config",
+    "set_config",
+    "conf",
+    "update_conf_from_config",
+
+    # Helpers
+    "WEEKDAYS",
+    "ON_LINUX",
+    "getkeyssortedbyvalues",
+    "getkeyssortedbyvaluekey",
+    "getstatsummarycounts",
+    "should_include_file",
+    "format_duration",
+    "sanitize_filename",
+    "parse_timestamp",
+
+    # Git commands
+    "getpipeoutput",
+    "getpipeoutput_list",
+    "get_default_branch",
+    "get_first_parent_flag",
+    "getlogrange",
+    "getcommitrange",
+    "is_git_repository",
+    "getversion",
+    "getgitversion",
+    "get_exectime_external",
+    "reset_exectime_external",
+
+    # Collectors
+    "BaseCollector",
+    "DataCollector",
+    "GitDataCollector",
+
+    # Parsers
+    "ASTNode",
+    "ModuleDef",
+    "ClassDef",
+    "InterfaceDef",
+    "FunctionDef",
+    "ImportDef",
+    "AttributeDef",
+    "walk",
+    "iter_child_nodes",
+    "Tokenizer",
+    "Token",
+    "TokenType",
+    "TokenizerState",
+    "LANGUAGE_KEYWORDS",
+
+    # Metrics
+    "calculate_maintainability_index",
+    "calculate_loc_metrics",
+    "calculate_halstead_metrics",
+    "calculate_mccabe_complexity",
+    "interpret_maintainability_index",
+    "OOPMetricsAnalyzer",
+    "format_oop_report",
+
+    # Reports
+    "TableDataGenerator",
+    "ReportCreator",
+    "HTMLReportCreator",
+    "html_linkify",
+    "html_header",
+    "get_sortable_js",
+
+    # Repository discovery
+    "_is_bare_repository",
+    "discover_repositories",
+    "_discover_repositories_concurrent",
+
+    # CLI
+    "usage",
+    "GitStats",
+]

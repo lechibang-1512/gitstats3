@@ -63,3 +63,5 @@ secrets.json
 # Misc
 *.egg
 
+# Build artifacts from src/
+*.egg-info/
