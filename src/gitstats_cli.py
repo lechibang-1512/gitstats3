@@ -18,6 +18,9 @@ from .gitstats_gitdatacollector import GitDataCollector
 from .gitstats_htmlreport import HTMLReportCreator
 from .gitstats_repository import discover_repositories, _discover_repositories_concurrent
 from .gitstats_helpers import time_start
+from .gitstats_hotspot import HotspotDetector, analyze_hotspots
+from .gitstats_export import export_to_json, export_to_yaml
+from .gitstats_visualization import generate_visualizations
 
 
 
@@ -31,6 +34,9 @@ Options:
 --debug          Enable debug output
 --verbose        Enable verbose output
 --multi-repo     Scan folder recursively for multiple repositories and generate reports for each
+--export-json    Export metrics to JSON file in output directory
+--export-yaml    Export metrics to YAML file in output directory (requires PyYAML)
+--no-hotspots    Disable hotspot analysis
 -h, --help       Show this help message
 
 Note: GitStats generates HTML reports with charts and detailed statistics.
@@ -91,7 +97,10 @@ Please see the manual page for more details.
 class GitStats:
 	def run(self, args_orig):
 		multi_repo_mode = False
-		optlist, args = getopt.getopt(args_orig, 'hc:', ["help", "debug", "verbose", "multi-repo"])
+		export_json = False
+		export_yaml = False
+		analyze_hotspots_enabled = True
+		optlist, args = getopt.getopt(args_orig, 'hc:', ["help", "debug", "verbose", "multi-repo", "export-json", "export-yaml", "no-hotspots"])
 		for o,v in optlist:
 			if o == '-c':
 				if '=' not in v:
@@ -136,9 +145,20 @@ class GitStats:
 				conf['verbose'] = True
 			elif o == '--multi-repo':
 				multi_repo_mode = True
+			elif o == '--export-json':
+				export_json = True
+			elif o == '--export-yaml':
+				export_yaml = True
+			elif o == '--no-hotspots':
+				analyze_hotspots_enabled = False
 			elif o in ('-h', '--help'):
 				usage()
 				sys.exit()
+
+		# Store export flags in config for use in processing
+		conf['export_json'] = export_json
+		conf['export_yaml'] = export_yaml
+		conf['analyze_hotspots'] = analyze_hotspots_enabled
 
 		if multi_repo_mode:
 			if len(args) != 2:
@@ -635,13 +655,56 @@ class GitStats:
 
 			os.chdir(rundir)
 
+			# Hotspot analysis
+			hotspot_data = {}
+			if conf.get('analyze_hotspots', True):
+				print('Analyzing code hotspots...')
+				try:
+					detector = HotspotDetector(data)
+					hotspots = detector.analyze()
+					hotspot_data = {
+						'hotspots': hotspots,
+						'summary': detector.get_summary()
+					}
+					critical_count = len([h for h in hotspots if h.get('risk_level') == 'critical'])
+					high_count = len([h for h in hotspots if h.get('risk_level') == 'high'])
+					print(f'✓ Hotspot analysis completed: {critical_count} critical, {high_count} high-risk files')
+				except Exception as e:
+					if conf.get('debug'):
+						import traceback
+						traceback.print_exc()
+					print(f'⚠️  Hotspot analysis failed: {e}')
+
 			print('Generating report...')
 			
 			print('Creating HTML report...')
 			html_report = HTMLReportCreator()
+			# Pass hotspot data to report creator
+			html_report.hotspot_data = hotspot_data
 			html_report.create(data, outputpath)
 			
+			# Export to JSON/YAML if requested
+			if conf.get('export_json', False):
+				print('Exporting metrics to JSON...')
+				try:
+					json_path = export_to_json(data, outputpath, hotspot_data)
+					print(f'✓ JSON export saved to: {json_path}')
+				except Exception as e:
+					print(f'⚠️  JSON export failed: {e}')
+			
+			if conf.get('export_yaml', False):
+				print('Exporting metrics to YAML...')
+				try:
+					yaml_path = export_to_yaml(data, outputpath, hotspot_data)
+					if yaml_path:
+						print(f'✓ YAML export saved to: {yaml_path}')
+					else:
+						print('⚠️  YAML export failed (PyYAML not installed)')
+				except Exception as e:
+					print(f'⚠️  YAML export failed: {e}')
+			
 			print(f'✓ Successfully generated report for {repo_name}')
+
 
 		time_end = time.time()
 		exectime_internal = time_end - time_start

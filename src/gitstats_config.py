@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from typing import Set, Optional
 import os
 
+from .gitstats_constants import ALLOWED_EXTENSIONS
+
 
 @dataclass
 class GitStatsConfig:
@@ -50,13 +52,8 @@ class GitStatsConfig:
     multi_repo_batch_size: int = 10
     multi_repo_progress_interval: int = 5
     
-    # File extension filtering
-    allowed_extensions: Set[str] = field(default_factory=lambda: {
-        '.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx', '.m', '.mm',
-        '.swift', '.cu', '.cuh', '.cl', '.java', '.scala', '.kt', '.go', '.rs',
-        '.py', '.pyi', '.pyx', '.pxd', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx',
-        '.d.ts', '.lua', '.proto', '.thrift', '.asm', '.s', '.S', '.R', '.r'
-    })
+    # File extension filtering (uses centralized constants by default)
+    allowed_extensions: Set[str] = field(default_factory=lambda: ALLOWED_EXTENSIONS.copy())
     filter_by_extensions: bool = True
     calculate_mi_per_repository: bool = True
     

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Optional, Set
 
+from .gitstats_constants import LANGUAGE_KEYWORDS
+
 
 class TokenType(Enum):
     """Token types for the tokenizer."""
@@ -48,51 +50,8 @@ class TokenizerState(Enum):
     IN_TEMPLATE_STRING = auto()
 
 
-# Language-specific keywords
-LANGUAGE_KEYWORDS = {
-    'python': {'class', 'def', 'import', 'from', 'as', 'try', 'except', 
-              'finally', 'with', 'async', 'await', 'yield', 'lambda',
-              'pass', 'raise', 'global', 'nonlocal', 'assert', 'del',
-              'True', 'False', 'None', 'and', 'or', 'not', 'in', 'is',
-              'if', 'else', 'elif', 'for', 'while', 'return', 'break', 'continue'},
-    'java': {'class', 'interface', 'enum', 'abstract', 'final', 'static',
-            'public', 'private', 'protected', 'extends', 'implements',
-            'new', 'this', 'super', 'void', 'null', 'true', 'false',
-            'import', 'package', 'throws', 'throw', 'try', 'catch',
-            'synchronized', 'volatile', 'transient', 'native',
-            'if', 'else', 'for', 'while', 'return', 'break', 'continue'},
-    'javascript': {'class', 'function', 'const', 'let', 'var', 'import',
-                  'export', 'from', 'default', 'extends', 'new', 'this',
-                  'super', 'async', 'await', 'yield', 'null', 'undefined',
-                  'true', 'false', 'typeof', 'instanceof', 'delete',
-                  'if', 'else', 'for', 'while', 'return', 'break', 'continue'},
-    'typescript': {'class', 'function', 'const', 'let', 'var', 'import',
-                  'export', 'from', 'default', 'extends', 'implements',
-                  'interface', 'type', 'enum', 'abstract', 'new', 'this',
-                  'super', 'async', 'await', 'public', 'private', 'protected',
-                  'readonly', 'static', 'null', 'undefined',
-                  'if', 'else', 'for', 'while', 'return', 'break', 'continue'},
-    'cpp': {'class', 'struct', 'enum', 'union', 'namespace', 'template',
-           'virtual', 'override', 'final', 'static', 'const', 'mutable',
-           'public', 'private', 'protected', 'friend', 'inline', 'extern',
-           'new', 'delete', 'this', 'nullptr', 'true', 'false', 'sizeof',
-           'typedef', 'using', 'typename', 'explicit', 'operator',
-           'if', 'else', 'for', 'while', 'return', 'break', 'continue'},
-    'go': {'func', 'type', 'struct', 'interface', 'package', 'import',
-          'const', 'var', 'map', 'chan', 'go', 'defer', 'select', 'case',
-          'default', 'range', 'nil', 'true', 'false', 'iota',
-          'if', 'else', 'for', 'return', 'break', 'continue'},
-    'rust': {'fn', 'struct', 'enum', 'trait', 'impl', 'mod', 'use', 'pub',
-            'crate', 'super', 'self', 'Self', 'const', 'static', 'mut',
-            'ref', 'let', 'match', 'loop', 'async', 'await', 'move',
-            'dyn', 'where', 'unsafe', 'extern',
-            'if', 'else', 'for', 'while', 'return', 'break', 'continue'},
-    'swift': {'class', 'struct', 'enum', 'protocol', 'extension', 'func',
-             'var', 'let', 'import', 'public', 'private', 'internal',
-             'fileprivate', 'open', 'static', 'final', 'override',
-             'init', 'deinit', 'self', 'Self', 'nil', 'true', 'false',
-             'if', 'else', 'for', 'while', 'return', 'break', 'continue'}
-}
+# Re-export for backward compatibility
+# LANGUAGE_KEYWORDS is now imported from gitstats_constants
 
 
 class Tokenizer:

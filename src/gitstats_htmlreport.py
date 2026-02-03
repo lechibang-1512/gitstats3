@@ -6,6 +6,7 @@ Contains the ReportCreator base class and HTMLReportCreator for generating HTML 
 
 import datetime
 import os
+import shutil
 import time
 
 from .gitstats_config import conf, get_config
@@ -14,6 +15,7 @@ from .gitstats_gitcommands import getversion, getgitversion, get_exectime_extern
 from .gitstats_tabledata import TableDataGenerator
 from .gitstats_sortable import get_sortable_js
 from .gitstats_oopmetrics import format_oop_report
+from .gitstats_visualization import VisualizationGenerator
 
 
 def html_linkify(text):
@@ -55,18 +57,20 @@ class HTMLReportCreator(ReportCreator):
 		# timezone max for coloring; default to 1 if empty
 		max_commits_on_tz = max(data.commits_by_timezone.values()) if data.commits_by_timezone else 1
 
-		# copy static files. Looks in the binary directory, ../share/gitstats and /usr/share/gitstats
+		# copy static files. Looks in the assets subdirectory, ../share/gitstats and /usr/share/gitstats
 		binarypath = os.path.dirname(os.path.abspath(__file__))
+		assetspath = os.path.join(binarypath, 'assets')
 		secondarypath = os.path.join(binarypath, '..', 'share', 'gitstats')
-		basedirs = [binarypath, secondarypath, '/usr/share/gitstats']
+		basedirs = [assetspath, binarypath, secondarypath, '/usr/share/gitstats']
 		for file in ('arrow-up.gif', 'arrow-down.gif', 'arrow-none.gif'):
 			for base in basedirs:
-				src = base + '/' + file
+				src = os.path.join(base, file)
 				if os.path.exists(src):
-					shutil.copyfile(src, path + '/' + file)
+					shutil.copyfile(src, os.path.join(path, file))
 					break
 			else:
-				print('Warning: "%s" not found, so not copied (searched: %s)' % (file, basedirs))
+				if conf.get('verbose'):
+					print('Warning: "%s" not found (searched: %s)' % (file, basedirs))
 
 		# Create single combined HTML file
 		f = open(path + "/index.html", 'w')
@@ -79,6 +83,9 @@ class HTMLReportCreator(ReportCreator):
 
 		self.printCombinedNav(f)
 
+		# ===== OVERVIEW TAB =====
+		f.write('<div id="panel-overview" class="tab-panel">')
+		
 		# General section
 		f.write('<div id="general" class="section">')
 		f.write(html_header(2, 'General'))
@@ -130,7 +137,11 @@ class HTMLReportCreator(ReportCreator):
 		
 		f.write('</dl>')
 		f.write('</div>  <!-- end general section -->')
+		f.write('</div>  <!-- end panel-overview -->')
 
+		# ===== HEALTH TAB =====
+		f.write('<div id="panel-health" class="tab-panel">')
+		
 		###
 		# Project Health - Enhanced Metrics for College Project
 		f.write('<div id="project_health" class="section">')
@@ -444,7 +455,11 @@ class HTMLReportCreator(ReportCreator):
 			f.write('</ul>')
 		
 		f.write('</div>  <!-- end project health section -->')
+		f.write('</div>  <!-- end panel-health -->')
 
+		# ===== TEAM TAB =====
+		f.write('<div id="panel-team" class="tab-panel">')
+		
 		###
 		# Team Analysis - New comprehensive team analysis section
 		f.write('<div id="team_analysis" class="section">')
@@ -743,7 +758,11 @@ class HTMLReportCreator(ReportCreator):
 		f.write('</table>')
 
 		f.write('</div>  <!-- end team_analysis section -->')
+		f.write('</div>  <!-- end panel-team -->')
 
+		# ===== ACTIVITY TAB =====
+		f.write('<div id="panel-activity" class="tab-panel">')
+		
 		###
 		# Activity section
 		f.write('<div id="activity" class="section">')
@@ -873,7 +892,7 @@ class HTMLReportCreator(ReportCreator):
 			f.write('<td>%s</td>' % (WEEKS - i))
 		f.write('</tr></table>')
 
-		# Hour of Day
+		# Hour of Day - compact heatmap (detailed analysis in polar chart visualization)
 		f.write(html_header(2, 'Hour of Day'))
 		hour_of_day = data.getActivityByHourOfDay()
 		fg = open(path + '/hour_of_day.dat', 'w')
@@ -884,19 +903,8 @@ class HTMLReportCreator(ReportCreator):
 				fg.write('%d 0\n' % (i + 1))
 		fg.close()
 		
-		# Display hour of day data as a table instead of chart
-		if hasattr(self, 'table_data') and 'hour_of_day' in self.table_data:
-			f.write(self.table_data['hour_of_day'])
-		else:
-			# Fallback simple table
-			f.write('<table class="sortable" id="hour_of_day_detail">')
-			f.write('<tr><th>Hour</th><th>Commits</th><th>Percentage</th></tr>')
-			total_commits = sum(hour_of_day.values()) if hour_of_day else 0
-			for i in range(0, 24):
-				commits = hour_of_day.get(i, 0)
-				percent = (commits * 100.0 / total_commits) if total_commits > 0 else 0
-				f.write('<tr><td>%02d:00</td><td>%d</td><td>%.1f%%</td></tr>' % (i, commits, percent))
-			f.write('</table>')
+		# Compact heatmap bar only (polar chart in visualizations section)
+		total_commits = sum(hour_of_day.values()) if hour_of_day else 0
 		f.write('<table><tr><th>Hour</th>')
 		for i in range(0, 24):
 			f.write('<th>%d</th>' % i)
@@ -907,16 +915,8 @@ class HTMLReportCreator(ReportCreator):
 				f.write('<td style="background-color: rgb(%d, 0, 0)">%d</td>' % (r, hour_of_day[i]))
 			else:
 				f.write('<td>0</td>')
-		f.write('</tr>\n<tr><th>%</th>')
-		totalcommits = total_commits
-		for i in range(0, 24):
-			if i in hour_of_day:
-				r = 127 + int((float(hour_of_day[i]) / hour_of_day_busiest) * 128)
-				percent = (100.0 * hour_of_day[i]) / totalcommits if totalcommits else 0.0
-				f.write('<td style="background-color: rgb(%d, 0, 0)">%.2f</td>' % (r, percent))
-			else:
-				f.write('<td>0.00</td>')
 		f.write('</tr></table>')
+		f.write('<p><em>See Interactive Visualizations section for detailed polar chart.</em></p>')
 
 		# Day of Week
 		f.write(html_header(2, 'Day of Week'))
@@ -935,13 +935,12 @@ class HTMLReportCreator(ReportCreator):
 		else:
 			# Consolidated table with day, commits, percentage, and total
 			f.write('<table class="sortable day-of-week" id="day_of_week_detail">')
-			f.write('<tr><th>Day of Week</th><th>Commits</th><th>Percentage</th><th>Total (%)</th></tr>')
+			f.write('<tr><th>Day of Week</th><th>Commits</th><th>Percentage</th></tr>')
 			total_commits_week = sum(day_of_week.values()) if day_of_week else 0
 			for d in range(0, 7):
 				commits = day_of_week.get(d, 0)
 				week_percent = (commits * 100.0 / total_commits_week) if total_commits_week > 0 else 0
-				total_percent = (100.0 * commits) / totalcommits if totalcommits else 0.0
-				f.write('<tr><td>%s</td><td>%d</td><td>%.1f%%</td><td>%.2f%%</td></tr>' % (WEEKDAYS[d], commits, week_percent, total_percent))
+				f.write('<tr><td>%s</td><td>%d</td><td>%.1f%%</td></tr>' % (WEEKDAYS[d], commits, week_percent))
 			f.write('</table>')		# Hour of Week
 		f.write(html_header(2, 'Hour of Week'))
 		f.write('<table>')
@@ -1258,7 +1257,11 @@ class HTMLReportCreator(ReportCreator):
 			f.write('<tr><th>%s</th><td>%d (%.2f%%)</td></tr>' % (domain, info['commits'], percent))
 		f.write('</table></div>')
 		f.write('</div>  <!-- end authors section -->')
+		f.write('</div>  <!-- end panel-activity -->')
 
+		# ===== CODE TAB =====
+		f.write('<div id="panel-code" class="tab-panel">')
+		
 		###
 		# Files section
 		f.write('<div id="files" class="section">')
@@ -1380,19 +1383,8 @@ class HTMLReportCreator(ReportCreator):
 		except (AttributeError, TypeError):
 			pass
 
-		# Files with Most Revisions (Hotspots)
-		try:
-			hotspot_files = data.getFilesWithMostRevisions(15)
-			if hotspot_files:
-				f.write(html_header(2, 'Files with Most Revisions (Hotspots)'))
-				f.write('<table class="sortable" id="hotspot_files"><tr><th>File</th><th>Revisions</th><th>% of Total Commits</th></tr>')
-				total_commits = data.getTotalCommits()
-				for filepath, revisions in hotspot_files:
-					revision_pct = (100.0 * revisions / total_commits) if total_commits else 0.0
-					f.write('<tr><td>%s</td><td>%d</td><td>%.2f%%</td></tr>' % (filepath, revisions, revision_pct))
-				f.write('</table>')
-		except (AttributeError, TypeError):
-			pass
+		# Files with Most Revisions - REMOVED (now covered by Interactive Hotspot Analysis)
+		# The interactive visualization provides better churn analysis with risk scoring
 
 		# Directory Activity
 		try:
@@ -1548,6 +1540,22 @@ class HTMLReportCreator(ReportCreator):
 		f.write('</table>')
 		f.write('</div>  <!-- end tags section -->')
 
+		# Interactive Visualizations section
+		try:
+			hotspot_data = getattr(self, 'hotspot_data', {})
+			viz_generator = VisualizationGenerator(data, hotspot_data)
+			
+			# Add visualization styles and content
+			f.write(viz_generator.get_visualization_styles())
+			f.write(viz_generator.generate_all_visualizations_html())
+		except Exception as e:
+			if conf.get('debug'):
+				print(f'Warning: Failed to generate visualizations: {e}')
+			f.write('<!-- Visualization generation failed -->')
+
+		f.write('</div>  <!-- end panel-code -->')
+		f.write('</div>  <!-- end main-tabs -->')
+		
 		# Close the combined HTML file
 		f.write('</body></html>')
 		f.close()
@@ -1688,17 +1696,27 @@ class HTMLReportCreator(ReportCreator):
 """ % (self.title, conf['style'], getversion(), js_content))
 
 	def printCombinedHeader(self, f):
-		# Read CSS content
+		# Read CSS content - check assets subdirectory first
 		css_content = ""
 		binarypath = os.path.dirname(os.path.abspath(__file__))
-		css_path = os.path.join(binarypath, 'gitstats.css')
-		try:
-			with open(css_path, 'r') as css_file:
-				css_content = css_file.read()
-				# Escape % characters to prevent string formatting issues
-				css_content = css_content.replace('%', '%%')
-		except FileNotFoundError:
-			print(f'Warning: CSS file not found at {css_path}')
+		css_paths = [
+			os.path.join(binarypath, 'assets', 'gitstats.css'),
+			os.path.join(binarypath, 'gitstats.css'),
+			os.path.join(binarypath, '..', 'share', 'gitstats', 'gitstats.css'),
+			'/usr/share/gitstats/gitstats.css'
+		]
+		for css_path in css_paths:
+			try:
+				with open(css_path, 'r') as css_file:
+					css_content = css_file.read()
+					# Escape % characters to prevent string formatting issues
+					css_content = css_content.replace('%', '%%')
+				break
+			except FileNotFoundError:
+				continue
+		if not css_content:
+			if conf.get('verbose'):
+				print(f'Warning: CSS file not found in any search path')
 
 		# Get JavaScript content from sortable module
 		js_content = get_sortable_js().replace('%', '%%')
@@ -1714,6 +1732,53 @@ class HTMLReportCreator(ReportCreator):
 %s
 	.section {
 		margin-bottom: 2em;
+	}
+	
+	/* Main Tab Navigation Styles */
+	.main-tabs {
+		margin: 20px 0;
+	}
+	.main-tabs input[type="radio"] {
+		display: none;
+	}
+	.main-tabs > label {
+		display: inline-block;
+		padding: 14px 28px;
+		background: #e5e7eb;
+		color: #374151;
+		cursor: pointer;
+		border-radius: 8px 8px 0 0;
+		margin-right: 4px;
+		font-weight: 600;
+		font-size: 1em;
+		transition: all 0.2s ease;
+		border: 1px solid #d1d5db;
+		border-bottom: none;
+	}
+	.main-tabs > label:hover {
+		background: #d1d5db;
+	}
+	.main-tabs input[type="radio"]:checked + label {
+		background: white;
+		color: #2563eb;
+		border-bottom: 2px solid white;
+		position: relative;
+		z-index: 1;
+	}
+	.tab-panel {
+		display: none;
+		background: white;
+		padding: 25px;
+		border: 1px solid #d1d5db;
+		border-radius: 0 8px 8px 8px;
+		margin-top: -1px;
+	}
+	#tab-overview:checked ~ #panel-overview,
+	#tab-health:checked ~ #panel-health,
+	#tab-team:checked ~ #panel-team,
+	#tab-activity:checked ~ #panel-activity,
+	#tab-code:checked ~ #panel-code {
+		display: block;
 	}
 	
 	/* Print styles - ensure everything prints including backgrounds */
@@ -1939,6 +2004,7 @@ class HTMLReportCreator(ReportCreator):
 		font-weight: bold;
 	}
 	</style>
+	<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 	<script type="text/javascript">
 %s
 	</script>
@@ -1947,20 +2013,23 @@ class HTMLReportCreator(ReportCreator):
 """ % (self.title, getversion(), css_content, js_content))
 
 	def printCombinedNav(self, f):
+		"""Write tabbed navigation with radio buttons for CSS-only tab switching."""
 		f.write("""
-<div class="nav">
-<ul>
-<li><a href="#general">General</a></li>
-<li><a href="#project_health">Project Health</a></li>
-<li><a href="#activity">Activity</a></li>
-<li><a href="#authors">Authors</a></li>
-<li><a href="#team_analysis">Team Analysis</a></li>
-<li><a href="#branches">Branches</a></li>
-<li><a href="#files">Files</a></li>
-<li><a href="#lines">Lines</a></li>
-<li><a href="#tags">Tags</a></li>
-</ul>
-</div>
+<div class="main-tabs">
+    <input type="radio" name="main-tab" id="tab-overview" checked>
+    <label for="tab-overview">📊 Overview</label>
+    
+    <input type="radio" name="main-tab" id="tab-health">
+    <label for="tab-health">🏥 Health</label>
+    
+    <input type="radio" name="main-tab" id="tab-team">
+    <label for="tab-team">👥 Team</label>
+    
+    <input type="radio" name="main-tab" id="tab-activity">
+    <label for="tab-activity">📅 Activity</label>
+    
+    <input type="radio" name="main-tab" id="tab-code">
+    <label for="tab-code">📁 Code</label>
 """)
 
 	def printNav(self, f):

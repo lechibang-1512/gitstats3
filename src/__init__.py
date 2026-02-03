@@ -64,7 +64,14 @@ from .gitstats_tokenizer import (
     Token,
     TokenType,
     TokenizerState,
+)
+from .gitstats_constants import (
+    ALLOWED_EXTENSIONS,
     LANGUAGE_KEYWORDS,
+    EXTENSION_TO_LANGUAGE,
+    CONTROL_FLOW_KEYWORDS,
+    get_language_for_extension,
+    get_keywords_for_language,
 )
 
 # Metrics
@@ -91,6 +98,15 @@ from .gitstats_repository import (
 
 # CLI
 from .gitstats_cli import usage, GitStats
+
+# Hotspot Detection
+from .gitstats_hotspot import HotspotDetector, analyze_hotspots
+
+# Export
+from .gitstats_export import MetricsExporter, export_to_json, export_to_yaml
+
+# Visualizations
+from .gitstats_visualization import VisualizationGenerator, generate_visualizations
 
 
 __all__ = [
@@ -144,7 +160,14 @@ __all__ = [
     "Token",
     "TokenType",
     "TokenizerState",
+
+    # Constants
+    "ALLOWED_EXTENSIONS",
     "LANGUAGE_KEYWORDS",
+    "EXTENSION_TO_LANGUAGE",
+    "CONTROL_FLOW_KEYWORDS",
+    "get_language_for_extension",
+    "get_keywords_for_language",
 
     # Metrics
     "calculate_maintainability_index",
@@ -171,4 +194,17 @@ __all__ = [
     # CLI
     "usage",
     "GitStats",
+
+    # Hotspot Detection
+    "HotspotDetector",
+    "analyze_hotspots",
+
+    # Export
+    "MetricsExporter",
+    "export_to_json",
+    "export_to_yaml",
+
+    # Visualizations
+    "VisualizationGenerator",
+    "generate_visualizations",
 ]
