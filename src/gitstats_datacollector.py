@@ -746,28 +746,6 @@ class DataCollector:
 			return sum(scores) / len(scores)
 		return 0.0
 	
-	def analyze_file_complexity(self, filepath):
-		"""Basic complexity analysis for a file"""
-		try:
-			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-				content = f.read()
-			
-			# Simple complexity indicators
-			complexity = 0
-			lines = content.split('\n')
-			
-			for line in lines:
-				line = line.strip()
-				# Count control structures (basic cyclomatic complexity)
-				if any(keyword in line for keyword in ['if ', 'elif ', 'else:', 'for ', 'while ', 'try:', 'except', 'case ', 'switch']):
-					complexity += 1
-
-			
-			return complexity
-			
-		except Exception:
-			return 0
-	
 	def update_enhanced_metrics(self, filepath):
 		"""Update enhanced metrics for a given file"""
 		try:
@@ -792,8 +770,9 @@ class DataCollector:
 				if '"""' in line or "'''" in line:
 					comment_lines += 1
 			
-			# Complexity analysis
-			complexity = self.analyze_file_complexity(filepath)
+			# Complexity analysis - use proper McCabe calculation
+			mccabe_result = self._calculate_mccabe_complexity(content, ext)
+			complexity = mccabe_result.get('cyclomatic_complexity', 0)
 			self.project_health['code_quality']['cyclomatic_complexity'] += complexity
 			
 			if complexity > 20:  # High complexity threshold
@@ -893,11 +872,19 @@ class DataCollector:
 			# Calculate OOP metrics using the dedicated analyzer for Distance from Main Sequence
 			oop_distance_metrics = self.oop_analyzer.analyze_file(filepath, content, ext)
 			
+			# Pre-calculate complexity_score for hotspot analysis (avoids redundant calculation)
+			mi_value = maintainability_index.get('mi', 100)
+			cyclomatic = mccabe_metrics.get('cyclomatic_complexity', 0)
+			mi_part = max(0, 100 - (mi_value / 171 * 100))
+			cc_part = min(cyclomatic * 2, 100)
+			complexity_score = (mi_part * 0.6) + (cc_part * 0.4)
+			
 			return {
 				'loc': loc_metrics,
 				'halstead': halstead_metrics,
 				'mccabe': mccabe_metrics,
 				'maintainability_index': maintainability_index,
+				'complexity_score': complexity_score,  # Cached for hotspot analysis
 				'oop': oop_metrics,
 				'oop_distance': oop_distance_metrics,  # New: Distance from Main Sequence metrics
 				'filepath': filepath,

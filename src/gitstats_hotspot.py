@@ -55,10 +55,8 @@ class HotspotDetector:
     
     def _calculate_churn(self):
         """Calculate file churn metrics from revision history."""
-        # Get file revisions from data collector
-        file_revisions = getattr(self.data, 'file_revisions', {})
-        if not file_revisions:
-            file_revisions = self.data.code_analysis.get('file_revisions', {})
+        # Get file revisions from data collector (use property directly)
+        file_revisions = self.data.file_revisions
         
         # Calculate churn statistics
         if file_revisions:
@@ -96,12 +94,13 @@ class HotspotDetector:
                 # Get cyclomatic complexity
                 cyclomatic = complexity_data.get('cyclomatic', 0) if isinstance(complexity_data, dict) else 0
                 
-                # Convert MI to complexity score (inverted: higher MI = lower complexity)
-                # MI ranges from 0-171, we invert to get complexity
-                complexity_score = max(0, 100 - (mi / 171 * 100))
-                
-                # Combine with cyclomatic complexity
-                combined_complexity = (complexity_score * 0.6) + (min(cyclomatic * 2, 100) * 0.4)
+                # Use cached complexity_score if available, otherwise calculate
+                if 'complexity_score' in metrics:
+                    combined_complexity = metrics['complexity_score']
+                else:
+                    # Fallback: Calculate complexity score from MI and cyclomatic
+                    complexity_score = max(0, 100 - (mi / 171 * 100))
+                    combined_complexity = (complexity_score * 0.6) + (min(cyclomatic * 2, 100) * 0.4)
                 
                 self.file_complexity[filepath] = {
                     'maintainability_index': mi,

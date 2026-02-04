@@ -48,10 +48,7 @@ class VisualizationGenerator:
         
         # Get file sizes
         file_sizes = getattr(self.data, 'file_sizes', {})
-        file_revisions = getattr(self.data, 'file_revisions', {})
-        
-        if not file_revisions:
-            file_revisions = self.data.code_analysis.get('file_revisions', {})
+        file_revisions = self.data.file_revisions  # Use property directly
         
         # Extension color mapping
         ext_colors = {
