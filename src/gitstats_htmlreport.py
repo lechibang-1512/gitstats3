@@ -255,14 +255,20 @@ class HTMLReportCreator(ReportCreator):
 				f.write('<dt>Critical Files (MI < 0)</dt><dd>%d</dd>' % mi_summary.get('critical_files', 0))
 				f.write('</dl>')
 			
-			# OOP Summary (just count, no averages)
+			# Code Structure Summary (includes both OOP and function-only files)
 			oop_summary = cm.get('oop_summary', {})
-			if oop_summary and oop_summary.get('files_with_oop', 0) > 0:
-				f.write('<h4>Object-Oriented Programming Summary</h4>')
-				f.write('<p>Files with OOP constructs: %d / %d</p>' % (
-					oop_summary.get('files_with_oop', 0),
-					oop_summary.get('files_analyzed', 0)
-				))
+			f.write('<h4>Code Structure Summary</h4>')
+			f.write('<dl>')
+			f.write('<dt>Files with Classes</dt><dd>%d / %d</dd>' % (
+				oop_summary.get('files_with_oop', 0),
+				oop_summary.get('files_analyzed', 0)
+			))
+			# Add standalone function count from OOP analyzer
+			total_functions = sum(len(f_metrics.get('functions', [])) for f_metrics in data.oop_analyzer.files.values())
+			function_only_files = sum(1 for f_metrics in data.oop_analyzer.files.values() 
+				if f_metrics.get('classes_defined', 0) == 0 and f_metrics.get('function_count', 0) > 0)
+			f.write('<dt>Standalone Functions</dt><dd>%d (in %d files)</dd>' % (total_functions, function_only_files))
+			f.write('</dl>')
 			
 			# OOP Metrics - Distance from Main Sequence Analysis
 			f.write('<h3>OOP Metrics - Distance from Main Sequence (D)</h3>')

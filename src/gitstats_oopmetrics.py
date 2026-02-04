@@ -84,6 +84,11 @@ class FunctionDef(ASTNode):
     visibility: str = "public"
     body_start: int = 0
     body_end: int = 0
+    # CK Metrics - Function level
+    cyclomatic_complexity: int = 1  # Base complexity is 1
+    accessed_attributes: Set[str] = field(default_factory=set)  # Instance vars accessed
+    called_methods: Set[str] = field(default_factory=set)  # Methods called within this function
+    parameter_types: List[str] = field(default_factory=list)  # Types of parameters (for coupling)
     
     @property
     def _fields(self) -> tuple:
@@ -101,6 +106,14 @@ class ClassDef(ASTNode):
     is_abstract: bool = False
     is_interface: bool = False  # For Java interfaces, TS interfaces, Go interfaces
     nested_classes: List['ClassDef'] = field(default_factory=list)
+    # CK Metrics - Class level
+    wmc: int = 0  # Weighted Methods per Class (sum of cyclomatic complexity)
+    dit: int = 0  # Depth of Inheritance Tree
+    noc: int = 0  # Number of Children (direct subclasses)
+    cbo: int = 0  # Coupling Between Objects
+    rfc: int = 0  # Response For a Class
+    lcom: int = 0  # Lack of Cohesion in Methods
+    coupled_classes: Set[str] = field(default_factory=set)  # Classes this class is coupled to
     
     @property
     def _fields(self) -> tuple:
@@ -166,6 +179,261 @@ def iter_child_nodes(node: ASTNode) -> Iterator[ASTNode]:
                     yield item
         elif isinstance(value, ASTNode):
             yield value
+
+
+# =============================================================================
+# CK Metrics Calculation Functions
+# =============================================================================
+
+def calculate_wmc(cls: ClassDef, use_complexity_weights: bool = True) -> int:
+    """
+    Calculate Weighted Methods per Class (WMC).
+    
+    WMC = Sum of complexity of all methods in a class.
+    If use_complexity_weights is False, returns simple method count.
+    
+    Args:
+        cls: ClassDef node
+        use_complexity_weights: If True, sum cyclomatic complexity; else count methods
+    
+    Returns:
+        WMC value (higher = more complex class)
+    """
+    if not cls.methods:
+        return 0
+    
+    if use_complexity_weights:
+        return sum(max(1, m.cyclomatic_complexity) for m in cls.methods)
+    else:
+        return len(cls.methods)
+
+
+def calculate_dit(class_name: str, inheritance_map: Dict[str, List[str]]) -> int:
+    """
+    Calculate Depth of Inheritance Tree (DIT).
+    
+    DIT = Maximum path length from class to root of inheritance tree.
+    
+    Args:
+        class_name: Name of the class to calculate DIT for
+        inheritance_map: Dict mapping class names to their base class names
+    
+    Returns:
+        DIT value (0 = root class, higher = deeper inheritance)
+    """
+    visited = set()
+    depth = 0
+    current = class_name
+    
+    while current in inheritance_map and current not in visited:
+        visited.add(current)
+        bases = inheritance_map[current]
+        if not bases:
+            break
+        # Follow first base class (primary inheritance path)
+        current = bases[0]
+        depth += 1
+        # Limit depth to avoid infinite loops in malformed data
+        if depth > 100:
+            break
+    
+    return depth
+
+
+def calculate_noc(class_name: str, all_classes: List[ClassDef]) -> int:
+    """
+    Calculate Number of Children (NOC).
+    
+    NOC = Number of immediate subclasses of a class.
+    
+    Args:
+        class_name: Name of the parent class
+        all_classes: List of all ClassDef nodes in the codebase
+    
+    Returns:
+        NOC value (higher = more reuse, but potentially fragile base class)
+    """
+    return sum(1 for cls in all_classes if class_name in cls.bases)
+
+
+def calculate_cbo(cls: ClassDef, all_class_names: Set[str]) -> int:
+    """
+    Calculate Coupling Between Objects (CBO).
+    
+    CBO = Number of classes to which a class is coupled.
+    Coupling occurs through: inheritance, method calls, attribute types, parameters.
+    
+    Args:
+        cls: ClassDef node
+        all_class_names: Set of all known class names in the codebase
+    
+    Returns:
+        CBO value (lower = better, less coupled)
+    """
+    coupled = set()
+    
+    # Coupling via inheritance
+    coupled.update(cls.bases)
+    
+    # Coupling via attribute types
+    for attr in cls.attributes:
+        if attr.type_annotation and attr.type_annotation in all_class_names:
+            coupled.add(attr.type_annotation)
+    
+    # Coupling via method parameter types
+    for method in cls.methods:
+        for param_type in method.parameter_types:
+            if param_type in all_class_names:
+                coupled.add(param_type)
+        # Coupling via return types
+        if method.return_type and method.return_type in all_class_names:
+            coupled.add(method.return_type)
+    
+    # Coupling via method calls
+    for method in cls.methods:
+        for called in method.called_methods:
+            # Extract class name from method call (e.g., "ClassName.method" -> "ClassName")
+            if '.' in called:
+                class_ref = called.split('.')[0]
+                if class_ref in all_class_names:
+                    coupled.add(class_ref)
+    
+    # Remove self-reference
+    coupled.discard(cls.name)
+    
+    cls.coupled_classes = coupled
+    return len(coupled)
+
+
+def calculate_rfc(cls: ClassDef) -> int:
+    """
+    Calculate Response For a Class (RFC).
+    
+    RFC = Number of methods that can be executed in response to a message.
+    RFC = M + R where M = methods in class, R = unique methods called from M.
+    
+    Args:
+        cls: ClassDef node
+    
+    Returns:
+        RFC value (higher = more complex response, harder to test)
+    """
+    own_methods = len(cls.methods)
+    
+    # Collect all unique methods called from this class's methods
+    called_methods = set()
+    for method in cls.methods:
+        called_methods.update(method.called_methods)
+    
+    return own_methods + len(called_methods)
+
+
+def calculate_lcom(cls: ClassDef) -> int:
+    """
+    Calculate Lack of Cohesion in Methods (LCOM) using LCOM1 formula.
+    
+    LCOM = |P| - |Q| where:
+    - P = pairs of methods that don't share instance variables
+    - Q = pairs of methods that share instance variables
+    If LCOM < 0, return 0 (highly cohesive)
+    
+    Args:
+        cls: ClassDef node with accessed_attributes populated for each method
+    
+    Returns:
+        LCOM value (0 = cohesive, higher = non-cohesive, consider splitting)
+    """
+    methods = cls.methods
+    if len(methods) < 2:
+        return 0
+    
+    p = 0  # Pairs with no shared attributes
+    q = 0  # Pairs with shared attributes
+    
+    # Compare all pairs of methods
+    for i in range(len(methods)):
+        for j in range(i + 1, len(methods)):
+            attrs_i = methods[i].accessed_attributes
+            attrs_j = methods[j].accessed_attributes
+            
+            # Check if they share any instance variables
+            if attrs_i & attrs_j:  # Intersection is non-empty
+                q += 1
+            else:
+                p += 1
+    
+    lcom = p - q
+    return max(0, lcom)
+
+
+def calculate_lcom4(cls: ClassDef) -> int:
+    """
+    Calculate LCOM4 (improved LCOM using graph connectivity).
+    
+    LCOM4 counts the number of connected components in the method-attribute graph.
+    LCOM4 = 1 means perfectly cohesive, > 1 means the class could be split.
+    
+    Args:
+        cls: ClassDef node with accessed_attributes populated
+    
+    Returns:
+        Number of connected components (1 = cohesive, > 1 = consider splitting)
+    """
+    if not cls.methods:
+        return 0
+    
+    # Build adjacency: methods share an edge if they access common attributes
+    method_names = [m.name for m in cls.methods]
+    
+    # Union-Find for connected components
+    parent = {m.name: m.name for m in cls.methods}
+    
+    def find(x):
+        if parent[x] != x:
+            parent[x] = find(parent[x])
+        return parent[x]
+    
+    def union(x, y):
+        px, py = find(x), find(y)
+        if px != py:
+            parent[px] = py
+    
+    # Connect methods that share attributes
+    for i in range(len(cls.methods)):
+        for j in range(i + 1, len(cls.methods)):
+            if cls.methods[i].accessed_attributes & cls.methods[j].accessed_attributes:
+                union(cls.methods[i].name, cls.methods[j].name)
+    
+    # Also connect methods that call each other
+    for method in cls.methods:
+        for called in method.called_methods:
+            if called in parent:
+                union(method.name, called)
+    
+    # Count unique components
+    components = len(set(find(m) for m in method_names))
+    return components
+
+
+def apply_ck_metrics_to_class(cls: ClassDef, 
+                               all_classes: List[ClassDef],
+                               inheritance_map: Dict[str, List[str]],
+                               all_class_names: Set[str]) -> None:
+    """
+    Calculate and apply all CK metrics to a ClassDef node.
+    
+    Args:
+        cls: ClassDef to calculate metrics for
+        all_classes: All classes in the codebase (for NOC)
+        inheritance_map: Maps class names to their bases (for DIT)
+        all_class_names: Set of all class names (for CBO)
+    """
+    cls.wmc = calculate_wmc(cls, use_complexity_weights=True)
+    cls.dit = calculate_dit(cls.name, inheritance_map)
+    cls.noc = calculate_noc(cls.name, all_classes)
+    cls.cbo = calculate_cbo(cls, all_class_names)
+    cls.rfc = calculate_rfc(cls)
+    cls.lcom = calculate_lcom(cls)
 
 
 # =============================================================================
@@ -1842,7 +2110,7 @@ def _convert_python_class(node) -> ClassDef:
 
 
 def _convert_python_function(node) -> FunctionDef:
-    """Convert Python ast.FunctionDef to our FunctionDef."""
+    """Convert Python ast.FunctionDef to our FunctionDef with CK metrics extraction."""
     import ast as python_ast
     
     func = FunctionDef(
@@ -1853,9 +2121,15 @@ def _convert_python_function(node) -> FunctionDef:
         end_col_offset=getattr(node, 'end_col_offset', 0) or 0
     )
     
-    # Get arguments
+    # Get arguments and parameter types
     for arg in node.args.args:
         func.args.append(arg.arg)
+        if arg.annotation and hasattr(python_ast, 'unparse'):
+            try:
+                type_str = python_ast.unparse(arg.annotation)
+                func.parameter_types.append(type_str)
+            except Exception:
+                pass
     
     # Get decorators
     for dec in node.decorator_list:
@@ -1871,6 +2145,54 @@ def _convert_python_function(node) -> FunctionDef:
     # Get return type
     if node.returns:
         func.return_type = python_ast.unparse(node.returns) if hasattr(python_ast, 'unparse') else None
+    
+    # Calculate cyclomatic complexity and extract method-level metrics
+    complexity = 1  # Base complexity
+    accessed_attrs = set()
+    called_methods = set()
+    
+    for child in python_ast.walk(node):
+        # Count decision points for cyclomatic complexity
+        if isinstance(child, (python_ast.If, python_ast.While, python_ast.For)):
+            complexity += 1
+        elif isinstance(child, python_ast.BoolOp):
+            # 'and' / 'or' add complexity
+            complexity += len(child.values) - 1
+        elif isinstance(child, python_ast.ExceptHandler):
+            complexity += 1
+        elif isinstance(child, python_ast.comprehension):
+            complexity += 1  # List/dict/set comprehensions with conditionals
+            complexity += len(child.ifs)
+        elif isinstance(child, python_ast.IfExp):
+            complexity += 1  # Ternary expressions
+        elif isinstance(child, python_ast.Assert):
+            complexity += 1
+        elif isinstance(child, python_ast.Match) if hasattr(python_ast, 'Match') else False:
+            complexity += 1
+        
+        # Track accessed instance attributes (self.x)
+        if isinstance(child, python_ast.Attribute):
+            if isinstance(child.value, python_ast.Name) and child.value.id == 'self':
+                accessed_attrs.add(child.attr)
+        
+        # Track method calls
+        if isinstance(child, python_ast.Call):
+            if isinstance(child.func, python_ast.Attribute):
+                # obj.method() calls
+                if isinstance(child.func.value, python_ast.Name):
+                    caller = child.func.value.id
+                    method = child.func.attr
+                    if caller == 'self':
+                        called_methods.add(method)  # Internal method call
+                    else:
+                        called_methods.add(f"{caller}.{method}")  # External call
+            elif isinstance(child.func, python_ast.Name):
+                # Direct function/method calls
+                called_methods.add(child.func.id)
+    
+    func.cyclomatic_complexity = complexity
+    func.accessed_attributes = accessed_attrs
+    func.called_methods = called_methods
     
     return func
 
@@ -1919,7 +2241,22 @@ class OOPMetricsAnalyzer:
 			'method_count': 0,
 			'attribute_count': 0,
 			'dependencies': [],
-			'dependents': []
+			'dependents': [],
+			# Function-level metrics (applies to all files)
+			'function_count': 0,
+			'function_wmc': 0,  # Sum of all function complexities
+			'functions': [],
+			'classes': [],
+			# CK Metrics - aggregated at file level
+			'ck_metrics': {
+				'wmc_total': 0,
+				'avg_wmc': 0.0,
+				'max_dit': 0,
+				'total_noc': 0,
+				'avg_cbo': 0.0,
+				'avg_rfc': 0.0,
+				'avg_lcom': 0.0,
+			}
 		}
 		
 		if not content.strip():
@@ -1965,7 +2302,7 @@ class OOPMetricsAnalyzer:
 			return None
 		
 		try:
-			tree = ast_parse(content, file_extension)
+			tree = parse(content, file_extension)
 			
 			metrics = {
 				'classes_defined': 0,
@@ -1974,10 +2311,38 @@ class OOPMetricsAnalyzer:
 				'method_count': 0,
 				'attribute_count': 0,
 				'efferent_coupling': 0,
-				'dependencies': []
+				'dependencies': [],
+				# CK Metrics - aggregated at file level
+				'ck_metrics': {
+					'wmc_total': 0,
+					'avg_wmc': 0.0,
+					'max_dit': 0,
+					'total_noc': 0,
+					'avg_cbo': 0.0,
+					'avg_rfc': 0.0,
+					'avg_lcom': 0.0,
+				},
+				# Drill-down: per-class metrics
+				'classes': [],
+				# Drill-down: per-function metrics 
+				'functions': []
 			}
 			
-			# Count classes and their properties
+			# Collect all classes for CK metrics calculation
+			all_classes = []
+			all_class_names = set()
+			inheritance_map = {}
+			
+			# First pass: collect class info
+			for node in walk(tree):
+				if isinstance(node, ClassDef):
+					all_classes.append(node)
+					all_class_names.add(node.name)
+					inheritance_map[node.name] = node.bases
+				elif isinstance(node, InterfaceDef):
+					all_class_names.add(node.name)
+			
+			# Second pass: calculate metrics
 			for node in walk(tree):
 				if isinstance(node, ClassDef):
 					metrics['classes_defined'] += 1
@@ -1985,6 +2350,45 @@ class OOPMetricsAnalyzer:
 						metrics['abstract_classes'] += 1
 					metrics['method_count'] += len(node.methods)
 					metrics['attribute_count'] += len(node.attributes)
+					
+					# Apply CK metrics to this class
+					apply_ck_metrics_to_class(node, all_classes, inheritance_map, all_class_names)
+					
+					# Aggregate CK metrics at file level
+					metrics['ck_metrics']['wmc_total'] += node.wmc
+					metrics['ck_metrics']['max_dit'] = max(metrics['ck_metrics']['max_dit'], node.dit)
+					metrics['ck_metrics']['total_noc'] += node.noc
+					
+					# Store per-class details for drill-down
+					class_info = {
+						'name': node.name,
+						'lineno': node.lineno,
+						'is_abstract': node.is_abstract,
+						'bases': node.bases,
+						'wmc': node.wmc,
+						'dit': node.dit,
+						'noc': node.noc,
+						'cbo': node.cbo,
+						'rfc': node.rfc,
+						'lcom': node.lcom,
+						'coupled_classes': list(node.coupled_classes),
+						'method_count': len(node.methods),
+						'attribute_count': len(node.attributes),
+						# Per-method details for drill-down
+						'methods': [
+							{
+								'name': m.name,
+								'lineno': m.lineno,
+								'cyclomatic_complexity': m.cyclomatic_complexity,
+								'accessed_attributes': list(m.accessed_attributes),
+								'called_methods': list(m.called_methods),
+								'is_abstract': m.is_abstract,
+								'is_static': m.is_static,
+							}
+							for m in node.methods
+						]
+					}
+					metrics['classes'].append(class_info)
 				
 				elif isinstance(node, InterfaceDef):
 					metrics['interfaces_defined'] += 1
@@ -1994,6 +2398,30 @@ class OOPMetricsAnalyzer:
 				elif isinstance(node, ImportDef):
 					if node.module:
 						metrics['dependencies'].append(node.module)
+			
+			# Calculate averages for CK metrics
+			if metrics['classes_defined'] > 0:
+				metrics['ck_metrics']['avg_wmc'] = metrics['ck_metrics']['wmc_total'] / metrics['classes_defined']
+				total_cbo = sum(c['cbo'] for c in metrics['classes'])
+				total_rfc = sum(c['rfc'] for c in metrics['classes'])
+				total_lcom = sum(c['lcom'] for c in metrics['classes'])
+				metrics['ck_metrics']['avg_cbo'] = total_cbo / metrics['classes_defined']
+				metrics['ck_metrics']['avg_rfc'] = total_rfc / metrics['classes_defined']
+				metrics['ck_metrics']['avg_lcom'] = total_lcom / metrics['classes_defined']
+			
+			# Store standalone function metrics for drill-down
+			for func in tree.functions:
+				metrics['functions'].append({
+					'name': func.name,
+					'lineno': func.lineno,
+					'cyclomatic_complexity': func.cyclomatic_complexity,
+					'accessed_attributes': list(func.accessed_attributes),
+					'called_methods': list(func.called_methods),
+				})
+			
+			# Calculate function-level metrics for all files (OOP and non-OOP)
+			metrics['function_count'] = len(tree.functions)
+			metrics['function_wmc'] = sum(f['cyclomatic_complexity'] for f in metrics['functions'])
 			
 			# Deduplicate dependencies
 			metrics['dependencies'] = list(set(metrics['dependencies']))
