@@ -30,8 +30,14 @@ class GitStatsConfig:
     project_name: str = ''
     start_date: str = ''
     
-    # Processing settings
-    processes: int = field(default_factory=lambda: min(4, os.cpu_count() or 2))
+    # Processing settings (optimized for low-resource systems)
+    processes: int = field(default_factory=lambda: min(2, os.cpu_count() or 1))
+    
+    # Low memory mode settings
+    low_memory_mode: bool = False
+    max_cache_entries: int = 1000  # Limit cache size to reduce memory usage
+    chunk_size: int = 500  # Process commits in chunks to reduce peak memory
+    gc_threshold_mb: int = 512  # Run garbage collection when exceeding this
     
     # Debug settings
     debug: bool = False
@@ -87,6 +93,10 @@ class GitStatsConfig:
             'allowed_extensions': self.allowed_extensions,
             'filter_by_extensions': self.filter_by_extensions,
             'calculate_mi_per_repository': self.calculate_mi_per_repository,
+            'low_memory_mode': self.low_memory_mode,
+            'max_cache_entries': self.max_cache_entries,
+            'chunk_size': self.chunk_size,
+            'gc_threshold_mb': self.gc_threshold_mb,
         }
     
     @classmethod

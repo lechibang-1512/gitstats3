@@ -5,6 +5,7 @@ Contains the GitDataCollector class that extends DataCollector with git-specific
 """
 
 import datetime
+import gc
 import os
 import re
 import time
@@ -211,16 +212,23 @@ class GitDataCollector(DataCollector):
 			else:
 				revs_to_read.append((time,rev))
 
-		#Read revisions from repo
+		#Read revisions from repo using chunked processing for low memory usage
 		if revs_to_read:
-			# Use optimized multiprocessing with better resource management
 			worker_count = min(len(revs_to_read), conf['processes'])
+			chunk_size = conf.get('chunk_size', 500)
 			if conf['verbose']:
-				print(f'Processing {len(revs_to_read)} revisions with {worker_count} workers')
+				print(f'Processing {len(revs_to_read)} revisions with {worker_count} workers (chunk size: {chunk_size})')
 			
-			# Use context manager for better resource cleanup
-			with Pool(processes=worker_count) as pool:
-				time_rev_count = pool.map(getnumoffilesfromrev, revs_to_read)
+			# Process in chunks to reduce peak memory usage
+			for i in range(0, len(revs_to_read), chunk_size):
+				chunk = revs_to_read[i:i + chunk_size]
+				with Pool(processes=worker_count) as pool:
+					chunk_results = pool.map(getnumoffilesfromrev, chunk)
+				time_rev_count.extend(chunk_results)
+				
+				# Force cleanup between chunks to reduce memory pressure
+				del chunk_results
+				self._gc_if_needed()
 		else:
 			time_rev_count = []
 
@@ -302,27 +310,37 @@ class GitDataCollector(DataCollector):
 			else:
 				blobs_to_read.append((ext,blob_id))
 
-		#Get info abount line count for new blob's that wasn't found in cache
+		#Get info about line count for new blobs using chunked processing
+		ext_blob_linecount = []
 		if blobs_to_read:
 			worker_count = min(len(blobs_to_read), conf['processes'])
+			chunk_size = conf.get('chunk_size', 500)
 			if conf['verbose']:
-				print(f'Processing {len(blobs_to_read)} uncached blobs with {worker_count} workers')
+				print(f'Processing {len(blobs_to_read)} uncached blobs with {worker_count} workers (chunk size: {chunk_size})')
 			
-			with Pool(processes=worker_count) as pool:
-				ext_blob_linecount = pool.map(getnumoflinesinblob, blobs_to_read)
-		else:
-			ext_blob_linecount = []
+			for i in range(0, len(blobs_to_read), chunk_size):
+				chunk = blobs_to_read[i:i + chunk_size]
+				with Pool(processes=worker_count) as pool:
+					chunk_results = pool.map(getnumoflinesinblob, chunk)
+				ext_blob_linecount.extend(chunk_results)
+				del chunk_results
+				self._gc_if_needed()
 
-		# Also get SLOC analysis for ALL blobs (not just uncached ones)
+		# SLOC analysis for ALL blobs using chunked processing
+		ext_blob_sloc = []
 		if all_blobs_for_sloc:
 			worker_count = min(len(all_blobs_for_sloc), conf['processes'])
+			chunk_size = conf.get('chunk_size', 500)
 			if conf['verbose']:
-				print(f'Performing SLOC analysis on {len(all_blobs_for_sloc)} blobs with {worker_count} workers')
+				print(f'Performing SLOC analysis on {len(all_blobs_for_sloc)} blobs with {worker_count} workers (chunk size: {chunk_size})')
 			
-			with Pool(processes=worker_count) as pool:
-				ext_blob_sloc = pool.map(analyzesloc, all_blobs_for_sloc)
-		else:
-			ext_blob_sloc = []
+			for i in range(0, len(all_blobs_for_sloc), chunk_size):
+				chunk = all_blobs_for_sloc[i:i + chunk_size]
+				with Pool(processes=worker_count) as pool:
+					chunk_results = pool.map(analyzesloc, chunk)
+				ext_blob_sloc.extend(chunk_results)
+				del chunk_results
+				self._gc_if_needed()
 
 		#Update cache and write down info about number of number of lines
 		for (ext, blob_id, linecount) in ext_blob_linecount:
@@ -589,6 +607,25 @@ class GitDataCollector(DataCollector):
 		self._analyzeWorkingPatterns()
 		self._analyzeImpactAndQuality()
 		self._calculateTeamPerformanceMetrics()
+	
+	def _gc_if_needed(self):
+		"""Run garbage collection if memory usage exceeds threshold."""
+		gc_threshold = conf.get('gc_threshold_mb', 512)
+		try:
+			import psutil
+			mem_mb = psutil.Process().memory_info().rss / 1024 / 1024
+			if mem_mb > gc_threshold:
+				gc.collect()
+				if conf['verbose']:
+					new_mem = psutil.Process().memory_info().rss / 1024 / 1024
+					print(f'GC triggered at {mem_mb:.0f}MB, now {new_mem:.0f}MB')
+				return True
+		except ImportError:
+			# psutil not available, do periodic GC anyway in low_memory_mode
+			if conf.get('low_memory_mode', False):
+				gc.collect()
+				return True
+		return False
 	
 	def _detectMainBranch(self):
 		"""Detect the main branch (master, main, develop, etc.)"""

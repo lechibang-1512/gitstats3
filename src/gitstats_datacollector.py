@@ -5,12 +5,13 @@ Contains the base DataCollector class with repository metrics collection.
 """
 
 import datetime
+import gc
 import os
 import pickle
 import re
 import time
 import zlib
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from multiprocessing import Pool
 
 from .gitstats_config import conf, get_config
@@ -20,11 +21,35 @@ from .gitstats_oopmetrics import OOPMetricsAnalyzer
 from .gitstats_maintainability import calculate_maintainability_index, calculate_halstead_metrics, calculate_mccabe_complexity
 
 
+class LRUCache(OrderedDict):
+    """Size-limited LRU cache to prevent unbounded memory growth."""
+    
+    def __init__(self, maxsize=1000):
+        super().__init__()
+        self.maxsize = maxsize
+    
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+    
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self.maxsize:
+            self.popitem(last=False)
+    
+    def __contains__(self, key):
+        return OrderedDict.__contains__(self, key)
+
+
 class DataCollector:
 	"""Consolidated data collector for repository metrics with optimized memory usage."""
 	def __init__(self):
 		self.stamp_created = time.time()
-		self.cache = {}
+		# Use LRU cache with bounded size for low-memory systems
+		self.cache = LRUCache(maxsize=conf.get('max_cache_entries', 1000))
 		self.total_authors = 0
 		
 		# Initialize OOP Metrics Analyzer for Distance from Main Sequence analysis

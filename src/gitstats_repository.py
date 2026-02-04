@@ -7,6 +7,8 @@ Contains functions for discovering and validating git repositories.
 import os
 import fnmatch
 import subprocess
+import threading
+import queue
 from concurrent.futures import ThreadPoolExecutor
 
 from .gitstats_config import conf, get_config
