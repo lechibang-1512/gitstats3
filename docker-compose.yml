@@ -1,0 +1,17 @@
+# docker-compose.yml — convenience wrapper for gitstats3
+#
+# Usage:
+#   REPO_PATH=/path/to/repo OUTPUT_PATH=./output docker compose run --rm gitstats3
+#
+# Or edit the defaults below and simply:
+#   docker compose run --rm gitstats3
+
+services:
+  gitstats3:
+    build: .
+    image: gitstats3:latest
+    volumes:
+      - ${REPO_PATH:-.}:/repo:ro
+      - ${OUTPUT_PATH:-./output}:/output
+    # override CMD to analyse the mounted repo
+    command: ["/repo", "/output"]

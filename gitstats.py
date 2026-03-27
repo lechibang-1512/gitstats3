@@ -28,10 +28,6 @@ from src import (
     getlogrange, getcommitrange,
     is_git_repository, getversion, getgitversion,
     get_exectime_external,
-    
-    # Table data
-    TableDataGenerator,
-    
     # OOP Metrics
     OOPMetricsAnalyzer, format_oop_report,
     

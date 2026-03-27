@@ -58,7 +58,6 @@ py-modules = [
     "ast_nodes",
     "tokenizer",
     "maintainability",
-    "table_data",
     "sortable",
     "gitstats_oopmetrics",
 ]

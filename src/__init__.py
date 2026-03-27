@@ -85,7 +85,6 @@ from .gitstats_maintainability import (
 from .gitstats_oopmetrics import OOPMetricsAnalyzer, format_oop_report
 
 # Reports
-from .gitstats_tabledata import TableDataGenerator
 from .gitstats_htmlreport import ReportCreator, HTMLReportCreator, html_linkify, html_header
 from .gitstats_sortable import get_sortable_js
 
@@ -179,7 +178,6 @@ __all__ = [
     "format_oop_report",
 
     # Reports
-    "TableDataGenerator",
     "ReportCreator",
     "HTMLReportCreator",
     "html_linkify",

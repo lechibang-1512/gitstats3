@@ -1,0 +1,50 @@
+# VCS
+.git
+.gitignore
+
+# Python artifacts
+__pycache__
+*.py[cod]
+*$py.class
+*.egg-info
+*.egg
+.eggs
+build
+dist
+
+# Virtual environments
+.venv
+venv
+env
+
+# Test / coverage
+.pytest_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# IDE
+.vscode
+.idea
+*.sublime-*
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker (avoid recursive context)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Logs & secrets
+*.log
+*.sqlite3
+.env
+.env.*
+secrets.json
+
+# Gemini / agent data
+.gemini
+.agents

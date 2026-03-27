@@ -63,5 +63,8 @@ secrets.json
 # Misc
 *.egg
 
+# Docker
+output/
+
 # Build artifacts from src/
 *.egg-info/
