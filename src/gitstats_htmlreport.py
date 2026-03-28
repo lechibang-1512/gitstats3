@@ -8,6 +8,7 @@ import datetime
 import os
 import shutil
 import time
+import sys
 
 from .gitstats_config import conf, get_config
 from .gitstats_helpers import WEEKDAYS, getkeyssortedbyvalues, getkeyssortedbyvaluekey, get_output_format
@@ -57,11 +58,20 @@ class HTMLReportCreator(ReportCreator):
 		# timezone max for coloring; default to 1 if empty
 		max_commits_on_tz = max(data.commits_by_timezone.values()) if data.commits_by_timezone else 1
 
-		# copy static files. Looks in the assets subdirectory, ../share/gitstats and /usr/share/gitstats
-		binarypath = os.path.dirname(os.path.abspath(__file__))
-		assetspath = os.path.join(binarypath, 'assets')
+		# Get the path to the executable or script
+		if hasattr(sys, '_MEIPASS'):
+			# Running in a PyInstaller bundle
+			binarypath = sys._MEIPASS
+			assetspath = os.path.join(binarypath, 'src', 'assets')
+		else:
+			# Running as a regular script
+			binarypath = os.path.dirname(os.path.abspath(__file__))
+			assetspath = os.path.join(binarypath, 'assets')
+		
 		secondarypath = os.path.join(binarypath, '..', 'share', 'gitstats')
 		basedirs = [assetspath, binarypath, secondarypath, '/usr/share/gitstats']
+		
+		# Copy static files (images)
 		for file in ('arrow-up.gif', 'arrow-down.gif', 'arrow-none.gif'):
 			for base in basedirs:
 				src = os.path.join(base, file)
@@ -1704,13 +1714,21 @@ class HTMLReportCreator(ReportCreator):
 	def printCombinedHeader(self, f):
 		# Read CSS content - check assets subdirectory first
 		css_content = ""
-		binarypath = os.path.dirname(os.path.abspath(__file__))
-		css_paths = [
-			os.path.join(binarypath, 'assets', 'gitstats.css'),
-			os.path.join(binarypath, 'gitstats.css'),
-			os.path.join(binarypath, '..', 'share', 'gitstats', 'gitstats.css'),
-			'/usr/share/gitstats/gitstats.css'
-		]
+		# Determine search paths for CSS
+		if hasattr(sys, '_MEIPASS'):
+			binarypath = sys._MEIPASS
+			css_paths = [
+				os.path.join(binarypath, 'src', 'assets', 'gitstats.css'),
+				os.path.join(binarypath, 'assets', 'gitstats.css'),
+			]
+		else:
+			binarypath = os.path.dirname(os.path.abspath(__file__))
+			css_paths = [
+				os.path.join(binarypath, 'assets', 'gitstats.css'),
+				os.path.join(binarypath, 'gitstats.css'),
+				os.path.join(binarypath, '..', 'share', 'gitstats', 'gitstats.css'),
+				'/usr/share/gitstats/gitstats.css'
+			]
 		for css_path in css_paths:
 			try:
 				with open(css_path, 'r') as css_file:

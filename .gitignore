@@ -68,3 +68,8 @@ output/
 
 # Build artifacts from src/
 *.egg-info/
+*.spec
+
+# Generated reports
+reports/
+

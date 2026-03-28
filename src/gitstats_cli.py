@@ -39,6 +39,9 @@ Options:
 --export-json    Export metrics to JSON file in output directory
 --export-yaml    Export metrics to YAML file in output directory (requires PyYAML)
 --no-hotspots    Disable hotspot analysis
+--api            Start REST API server
+--host HOST      Host for the API server (default: 0.0.0.0)
+--port PORT      Port for the API server (default: 8080)
 -h, --help       Show this help message
 
 Note: GitStats generates HTML reports with charts and detailed statistics.
@@ -98,11 +101,14 @@ Please see the manual page for more details.
 
 class GitStats:
 	def run(self, args_orig):
+		api_mode = False
+		api_host = "0.0.0.0"
+		api_port = 8080
 		multi_repo_mode = False
 		export_json = False
 		export_yaml = False
 		analyze_hotspots_enabled = True
-		optlist, args = getopt.getopt(args_orig, 'hc:', ["help", "debug", "verbose", "multi-repo", "export-json", "export-yaml", "no-hotspots"])
+		optlist, args = getopt.getopt(args_orig, 'hc:', ["help", "debug", "verbose", "multi-repo", "export-json", "export-yaml", "no-hotspots", "api", "host=", "port="])
 		for o,v in optlist:
 			if o == '-c':
 				if '=' not in v:
@@ -153,6 +159,12 @@ class GitStats:
 				export_yaml = True
 			elif o == '--no-hotspots':
 				analyze_hotspots_enabled = False
+			elif o == '--api':
+				api_mode = True
+			elif o == '--host':
+				api_host = v
+			elif o == '--port':
+				api_port = int(v)
 			elif o in ('-h', '--help'):
 				usage()
 				sys.exit()
@@ -161,6 +173,11 @@ class GitStats:
 		conf['export_json'] = export_json
 		conf['export_yaml'] = export_yaml
 		conf['analyze_hotspots'] = analyze_hotspots_enabled
+
+		if api_mode:
+			from .gitstats_api import start_api
+			start_api(host=api_host, port=api_port)
+			return
 
 		if multi_repo_mode:
 			if len(args) != 2:
